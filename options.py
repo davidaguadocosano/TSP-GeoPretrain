@@ -94,6 +94,15 @@ def get_options(args=None):
                         help='Set this value to only evaluate model')
     parser.add_argument('--seed', type=int, default=1234, help='Random seed to use')
 
+    # dac:  Pre-training / Contrastive Learning
+    parser.add_argument('--pretrain', action='store_true', help='Enable pre-training mode')
+    parser.add_argument('--cl_temp', type=float, default=0.07, 
+                        help='Temperature parameter for contrastive loss (InfoNCE)')
+    parser.add_argument('--cl_projector_dim', type=int, default=128, 
+                        help='Dimension of the projection head MLP')
+    parser.add_argument('--use_distributed', action='store_true', 
+                        help='Enable Distributed Data Parallel (DDP) for pre-training')
+
     # Misc
     parser.add_argument('--num_workers', type=int, default=0,
                         help='Number of workers for DataLoaders')

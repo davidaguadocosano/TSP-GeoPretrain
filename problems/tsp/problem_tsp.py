@@ -8,7 +8,7 @@ from scipy.spatial.distance import pdist, squareform
 
 from problems.tsp.state_tsp import StateTSP
 from utils.beam_search import beam_search
-
+from utils2.data_utils import rotate_nodes
 
 def nearest_neighbor_graph(nodes, neighbors, knn_strat):
     """Returns k-Nearest Neighbor graph as a **NEGATIVE** adjacency matrix
@@ -211,3 +211,31 @@ class TSPDataset(Dataset):
                 item['tour_edges'] = torch.LongTensor(tour_nodes_to_W(tour_nodes))
 
         return item
+
+#dac
+class TSPPretrainDataset(TSPDataset):
+    def __init__(self, *args, **kwargs):
+        # Forzamos que no sea supervisado ni NAR para el pre-entrenamiento
+        kwargs['supervised'] = False
+        kwargs['nar'] = False
+        super(TSPPretrainDataset, self).__init__(*args, **kwargs)
+
+    def __getitem__(self, idx):
+        # Obtenemos los nodos originales (v1)
+        nodes_v1 = torch.FloatTensor(self.nodes_coords[idx])
+        
+        # Generamos un ángulo aleatorio y rotamos para obtener la vista 2 (v2)
+        angle = np.random.rand() * 360
+        nodes_v2 = rotate_nodes(nodes_v1, angle)
+
+        # Importante: Ambos necesitan su matriz de adyacencia (grafo k-NN)
+        # Reutilizamos la función del proyecto original
+        graph_v1 = torch.ByteTensor(nearest_neighbor_graph(nodes_v1, self.neighbors, self.knn_strat))
+        graph_v2 = torch.ByteTensor(nearest_neighbor_graph(nodes_v2, self.neighbors, self.knn_strat))
+
+        return {
+            'nodes_v1': nodes_v1,
+            'graph_v1': graph_v1,
+            'nodes_v2': nodes_v2,
+            'graph_v2': graph_v2
+        }
