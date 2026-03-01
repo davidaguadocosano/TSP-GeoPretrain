@@ -3,6 +3,7 @@ import json
 import torch
 import argparse
 from tensorboard_logger import Logger as TbLogger
+from typing import Optional
 
 
 def log_values(
@@ -58,7 +59,8 @@ def log_values(
             tb_logger.log_value('critic_grad_norm_clipped', clipped[1], step)
 
 
-def config_logger(opts: argparse.Namespace) -> TbLogger | None:
+# Antes: def config_logger(opts: argparse.Namespace) -> TbLogger | None:
+def config_logger(opts: argparse.Namespace) -> Optional[TbLogger]:
     """
     Prints and saves arguments into a json file. Optionally sets up TensorBoard logging.
 

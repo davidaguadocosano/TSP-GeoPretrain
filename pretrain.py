@@ -1,322 +1,208 @@
+import os
 import time
+import json
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+import matplotlib.pyplot as plt
 from tqdm import tqdm
+from torch.utils.data import DataLoader
+from tensorboard_logger import Logger as TbLogger
 
-from envs import get_generator, envs, scenarios
-from nets import load_model, models
-from utils2 import *
+# Importaciones del proyecto original
+from options import get_options
+from problems.tsp.problem_tsp import TSPPretrainDataset
+from nets.encoders.gnn_encoder import GNNEncoder
+from nets.encoders.gat_encoder import GraphAttentionEncoder
+from nets.encoders.mlp_encoder import MLPEncoder
+from utils import move_to, torch_load_cpu
+from utils.data_utils import BatchedRandomSampler
 
-GRAPH_ENCODERS = list(models()['encoders']['graph_encoders'].keys())
-IMAGE_ENCODERS = list(models()['encoders']['image_encoders'].keys())
-DECODERS = models()['decoders']
-ENVS = list(envs().keys())
-SCENARIOS = scenarios()
-BASELINES = list(bls().keys())
+from utils2.train_utils import set_dataparallel, setup, cleanup
 
-
-def get_options(args: list = None) -> argparse.Namespace:
+def save_rotation_check(nodes_v1, nodes_v2, epoch, save_dir):
     """
-    Parse command line arguments to configure training options for the neural network model.
-
-    Args:
-        args (list): List of command line arguments. If None, defaults to sys.argv.
-
-    Returns:
-        argparse.Namespace: Parsed arguments as a namespace object.
+    Guarda una imagen con el grafo original y el rotado lado a lado.
     """
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--seed', type=int, default=1234, help="Random seed to use")
+    # Tomamos solo la primera muestra del batch y la movemos a CPU
+    v1 = nodes_v1[0].cpu().numpy()
+    v2 = nodes_v2[0].cpu().numpy()
     
-    ##################################################### MODEL #####################################################
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     
-    # Graph encoder
-    parser.add_argument('--graph_encoder', type=str, default='gtn', help=f"Graph encoders: {', '.join(GRAPH_ENCODERS)}. You may indicate a path to load instead")
-    
-    # Image encoder
-    parser.add_argument('--image_encoder', type=str, default=None, help=f"Image encoders: {', '.join(IMAGE_ENCODERS)}. You may indicate a path to load instead") #dac
-    parser.add_argument('--image_size', type=int, default=64, help=f"Binary map shape (assume squared image)")
-    parser.add_argument('--patch_size', type=int, default=16, help=f"Patch size for ViT encoder")
-    
-    # Decoder
-    parser.add_argument('--decoder', type=str, default='tsp-ar', help=f"Decoders: {', '.join(DECODERS)}. You may indicate a path to load instead")
-    parser.add_argument('--num_dirs', type=int, default=8, help=f"Number of directions the agent can turn")
-    
-    # Parameters
-    parser.add_argument('--hidden_dim', type=int, default=128, help="Dimension of embeddings")
-    parser.add_argument('--hidden_dim_ff', type=int, default=512, help="Dimension of embeddings of transformer's feed forward layers")
-    parser.add_argument('--dropout', type=int, default=0.1, help="Apply dropout")
-    parser.add_argument('--num_heads', type=int, default=8, help="Number of multi-heads for attention operations")
-    parser.add_argument('--num_blocks', type=int, default=3, help="Number of blocks in the encoder/critic network")
-    parser.add_argument('--freeze_encoder', type=str2bool, default=False, help="Whether to freeze encoder layers or not (for non-contrastive learning)")
-    
-    ##################################################### DATASET #####################################################
-    
-    # Type
-    parser.add_argument('--env', type=str, default='tsp', help=f"Problem to solve: {', '.join(ENVS)}")
-    parser.add_argument('--scenario', type=str, default='contrastive', help=f"Type of scenario: {', '.join(SCENARIOS)}")
-    
-    # Number of samples
-    parser.add_argument('--train_size', type=int, default=1280000, help="Number of instances per epoch during training")
-    parser.add_argument('--val_size', type=int, default=10000, help="Number of instances per epoch during validation")
-    
-    # Nodes & obstacles
-    parser.add_argument('--num_nodes', type=int, default=20, help="Number of visitable nodes")
-    parser.add_argument('--num_obs', type=int, default=0, help="Number of avoidable obstacles (0 to not use obstacles)")
-    
-    ##################################################### TRAINING #####################################################
-    
-    # Epochs
-    parser.add_argument('--num_epochs', type=int, default=100, help="Number of training epochs")
-    parser.add_argument('--first_epoch', type=int, default=0, help="Initial epoch (relevant for learning rate decay)")
-    
-    # Batch size
-    parser.add_argument('--batch_size', type=int, default=2048, help="Number of instances per batch during training")
-    parser.add_argument('--batch_size_val', type=int, default=1024, help="Number of instances per batch during validation")
-    
-    # Learning rate
-    parser.add_argument('--lr', type=float, default=1e-4, help="Learning rate")
-    parser.add_argument('--lr_critic', type=float, default=1e-4, help="Set the learning rate for the critic network")
-    parser.add_argument('--lr_decay', type=float, default=1.0, help="Learning rate decay per epoch")
-    
-    # Gradient norm
-    parser.add_argument('--max_grad_norm', type=float, default=1.0, help="Max L2 norm for gradient clipping (0 to disable clipping)")
-    
-    # Baselines
-    parser.add_argument('--baseline', type=str, default=None, help=f"Baseline to train with: ','.join({BASELINES})")
-    parser.add_argument('--bl_alpha', type=float, default=0.05, help="Significance in the t-test for updating rollout baseline")
-    parser.add_argument('--bl_exp', type=float, default=0.8, help="Exponential moving average baseline decay")
-    parser.add_argument('--bl_warmup', type=int, default=None, help="Number of epochs to warmup a rollout baseline. None means 1 exponential warmup epoch.")
-    
-    ##################################################### MISCELLANEOUS #####################################################
-    
-    # Device
-    parser.add_argument('--use_cuda', type=str2bool, default=True, help="True to use CUDA")
-    parser.add_argument('--use_distributed', type=str2bool, default=False, help="True to use distributed data parallel training (requires use_cuda=True)")
-    parser.add_argument('--num_workers', type=int, default=12, help="Number of parallel workers loading data batches")
-    
-    # Save model
-    parser.add_argument('--save_dir', default='outputs', help="Directory to save trained models to")
-    parser.add_argument('--cp_freq', type=int, default=1, help="Save checkpoint every n epochs, 0 to save no checkpoints")
-    
-    # Load model
-    parser.add_argument('--load_path', type=str, default='', help="Path to load model parameters and optimizer state from")
-    parser.add_argument('--resume', type=str2bool, default=False, help="Resume training beggining from the same epoch of load_path")
-    
-    # Logging
-    parser.add_argument('--log_step', type=int, default=50, help="Log info every log_step steps")
-    
-    # Debug mode
-    parser.add_argument('--debug', type=str2bool, default=False, help="Activate debug mode")
-    
-    ##################################################### END #####################################################
-    
-    # Parse arguments
-    opts = parser.parse_args(args)
-    
-    # Check if CUDA is available
-    cuda_available = torch.cuda.is_available()
-    opts.use_cuda = opts.use_cuda if cuda_available else False
-    opts.use_distributed = opts.use_distributed if cuda_available else False
-    print(f"[*] Device: {'CUDA' if opts.use_cuda else 'CPU'}{'' if cuda_available else ', since CUDA is not available'}")
-    
-    # Debug mode
-    if opts.debug:
-        opts.use_distributed = False
-        opts.num_workers = 0
-    
-    # Filename
-    time_txt = time.strftime("%Y-%m-%d-%H-%M-%S")  # time.strftime("%Y%m%dT%H%M%S")
-    encoder = {'graph': opts.graph_encoder, 'image': opts.image_encoder}.get(opts.scenario, '')
-    opts.model = f"{opts.graph_encoder}_{opts.image_encoder}" if encoder=='' else f"{encoder}_{opts.decoder}"
-    opts.save_dir = os.path.join(
-        opts.save_dir, f"{opts.env}-{opts.scenario}_{opts.num_nodes}", f"{opts.model}_{time_txt}",
-    )
-    
-    # Set seed for reproducibility
-    set_seed(seed=opts.seed)
-    return opts
+    # Dibujamos los puntos y conectamos en orden (para ver mejor la rotación)
+    for i, (coords, title) in enumerate([(v1, "Original (v1)"), (v2, "Rotado (v2)")]):
+        axes[i].scatter(coords[:, 0], coords[:, 1], c='red', s=30)
+        # Dibujamos líneas siguiendo el índice para que se aprecie el "giro" de la estructura
+        axes[i].plot(coords[:, 0], coords[:, 1], c='blue', alpha=0.3)
+        axes[i].set_title(title)
+        axes[i].set_xlim(-0.1, 1.1) # Un poco de margen para ver bien los bordes
+        axes[i].set_ylim(-0.1, 1.1)
+        axes[i].set_aspect('equal')
 
-
-def main(rank=0, opts=None, world_size=1):
-
-    # Tensorboard logger
-    tb_logger = config_logger(opts=opts)
+    plt.suptitle(f"Chequeo de Rotación - Época {epoch}")
     
-    # Configure device
-    if opts.use_distributed:
-        setup(rank=rank, world_size=world_size)
-        opts.device = rank
-    else:
-        opts.device = torch.device("cuda" if opts.use_cuda else "cpu")
-    
-    # Load model
-    model, checkpoint, first_epoch = load_model(opts=opts, train=True)
-    from nets.encoders.gat_encoder import GraphAttentionEncoder
-    model = GraphAttentionEncoder(n_layers=3, n_heads=8, hidden_dim=128)
+    save_path = os.path.join(save_dir, f"rotation_check_epoch_{epoch}.png")
+    plt.savefig(save_path)
+    plt.close()
+    print(f"[*] Imagen de control guardada en: {save_path}")
 
-    # ---------------------------------------------------------------------
+class ProjectionHead(nn.Module):
+    """Cabeza de proyección MLP para aprendizaje contrastivo (estilo SimCLR)"""
+    def __init__(self, dim_in, dim_out):
+        super(ProjectionHead, self).__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(dim_in, dim_in),
+            nn.ReLU(),
+            nn.Linear(dim_in, dim_out)
+        )
+
+    def forward(self, x):
+        return self.mlp(x)
+
+def info_nce_loss(z1, z2, temp=0.07):
+    """Cálculo de la pérdida InfoNCE entre dos vistas del mismo grafo"""
+    batch_size = z1.shape[0]
     
+    # Normalizar los embeddings (esencial para el coseno)
+    z1 = F.normalize(z1, dim=1)
+    z2 = F.normalize(z2, dim=1)
+    
+    # Similitud entre todas las combinaciones (matriz de batch_size x batch_size)
+    logits = torch.mm(z1, z2.t()) / temp
+    
+    # Las etiquetas positivas están en la diagonal (v1_i coincide con v2_i)
+    labels = torch.arange(batch_size).to(z1.device)
+    loss = F.cross_entropy(logits, labels)
+    return loss
+
+def train_epoch(init_embed,encoder, projector, optimizer, dataloader, epoch, tb_logger, opts):
+    init_embed.train() #nuevo
+    encoder.train()
+    projector.train()
+    
+    total_loss = 0
+    step = epoch * (opts.epoch_size // opts.batch_size)
+
+    pbar = tqdm(dataloader, desc=f"Epoch {epoch}")
+    for batch_id, batch in enumerate(pbar):
+        
+        if epoch == 0 and batch_id == 0:
+            save_rotation_check(batch['nodes_v1'], batch['nodes_v2'], epoch, opts.save_dir)
+
+        # Mover datos a GPU
+        v1_nodes = move_to(batch['nodes_v1'], opts.device)
+        v1_graph = move_to(batch['graph_v1'], opts.device)
+        v2_nodes = move_to(batch['nodes_v2'], opts.device)
+        v2_graph = move_to(batch['graph_v2'], opts.device)
+
+        optimizer.zero_grad()
+
+        # Proyectar de 2D a 128D antes de la GNN
+        v1_embedded = init_embed(v1_nodes)
+        v2_embedded = init_embed(v2_nodes)
+
+        # Pasar ambas vistas por el encoder y el proyector
+        # Nota: GNNEncoder espera (nodos, grafo)
+        # Usamos .mean(1) para obtener un embedding global del grafo a partir de los nodos
+        h1 = encoder(v1_embedded, v1_graph).mean(1) 
+        h2 = encoder(v2_embedded, v2_graph).mean(1)
+
+        z1 = projector(h1)
+        z2 = projector(h2)
+
+        # Calcular pérdida contrastiva
+        loss = info_nce_loss(z1, z2, temp=opts.cl_temp)
+        
+        loss.backward()
+        nn.utils.clip_grad_norm_(encoder.parameters(), opts.max_grad_norm)
+        optimizer.step()
+
+        total_loss += loss.item()
+        
+        # Log en TensorBoard
+        if tb_logger is not None and step % opts.log_step == 0:
+            tb_logger.log_value('pretrain/loss', loss.item(), step)
+        
+        step += 1
+        pbar.set_postfix(loss=loss.item())
+
+def run(opts):
+    # Setup inicial idéntico a run.py
+    torch.manual_seed(opts.seed)
+    opts.device = torch.device("cuda:0" if opts.use_cuda else "cpu")
+    
+    if not os.path.exists(opts.save_dir):
+        os.makedirs(opts.save_dir)
+
+    # Logger
+    tb_logger = None
+    if not opts.no_tensorboard:
+        tb_logger = TbLogger(os.path.join(opts.log_dir, f"pretrain_{opts.run_name}"))
+
+    # 0. Capa de proyección inicial (De 2D a embedding_dim)
+    init_embed = nn.Linear(2, opts.embedding_dim).to(opts.device)
+
+    # 1. Instanciar Encoder
+    encoder_class = {
+        'gnn': GNNEncoder,
+        'gat': GraphAttentionEncoder,
+        'mlp': MLPEncoder
+    }.get(opts.encoder)
+    
+    encoder = encoder_class(
+        n_layers=opts.n_encode_layers,
+        hidden_dim=opts.embedding_dim,
+        aggregation=opts.aggregation,
+        norm=opts.normalization,
+        learn_norm=opts.learn_norm,
+        track_norm=opts.track_norm,
+        gated=opts.gated,
+        n_heads=opts.n_heads
+    ).to(opts.device)
+
+    # 2. Instanciar Cabeza de Proyección
+    projector = ProjectionHead(opts.embedding_dim, opts.cl_projector_dim).to(opts.device)
+
     # Optimizer
-    optimizer = load_optimizer(
-        opts=opts,
-        model=model,
-        baseline=None,
-        checkpoint=checkpoint
+    optimizer = torch.optim.Adam(
+        list(init_embed.parameters()) + list(encoder.parameters()) + list(projector.parameters()), 
+        lr=opts.lr_model
     )
-    
-    # Load learning rate scheduler, decay by lr_decay once per epoch
-    lr_scheduler = load_lr_scheduler(
-        optimizer=optimizer,
-        lr_decay=opts.lr_decay
+
+    # 3. Cargar Dataset (Usa la nueva clase que añadimos)
+    dataset = TSPPretrainDataset(
+        min_size=opts.min_size,
+        max_size=opts.max_size,
+        num_samples=opts.epoch_size,
+        batch_size=opts.batch_size,
+        neighbors=opts.neighbors,
+        knn_strat=opts.knn_strat
     )
-    
-    # Validation dataloader
-    val_dataloader = get_generator(
-        env=opts.env,
-        num_samples=opts.val_size,
-        num_nodes=opts.num_nodes,
-        num_obs=opts.num_obs,
-        image_size=opts.image_size,
-        batch_size=opts.batch_size_val,
-        use_cuda=opts.use_cuda,
-        use_distributed=opts.use_distributed,
+    # se generan grafos de diversos tamaños. antes al barajarlos, pytorch no los podia apilar
+    #al ser tensores de distntos tamaños. asi que se barajean dentro de los lotes de cada tamaño
+    sampler = BatchedRandomSampler(dataset, opts.batch_size)
+    dataloader = DataLoader(
+        dataset, 
+        batch_size=opts.batch_size, 
+        sampler=sampler, 
         num_workers=opts.num_workers
     )
 
-    #dac
-    val_history = []  # Lista para guardar el rendimiento de cada época
-    
-    # Train loop
-    for epoch in range(opts.num_epochs):
-
-        # Measure training time
-        start_time = time.time()
-    
-        # Train dataloader
-        train_dataloader = get_generator(
-            env=opts.env,
-            num_samples=opts.train_size,
-            num_nodes=opts.num_nodes,
-            num_obs=opts.num_obs,
-            image_size=opts.image_size,
-            batch_size=opts.batch_size,
-            use_cuda=opts.use_cuda,
-            use_distributed=opts.use_distributed,
-            num_workers=opts.num_workers
-        )
+    # Bucle de entrenamiento
+    for epoch in range(opts.n_epochs):
+        train_epoch(init_embed, encoder, projector, optimizer, dataloader, epoch, tb_logger, opts)
         
-        # Current training step
-        step = epoch * opts.train_size
-
-        # Tensorboard info
-        if not opts.debug:
-            tb_logger.log_value(
-                name='learnrate_pg0',
-                value=optimizer.param_groups[0]['lr'],
-                step=step
-            )
-        
-        # Bath iteration
-        print(f"\nStart train epoch {epoch}, lr={optimizer.param_groups[0]['lr']}")
-        for batch_id, batch in enumerate(tqdm(train_dataloader, desc='Training')):
-            
-            #dac----------------------------------------------------------------------------
-            if epoch == first_epoch and batch_id == 0:
-                from utils.plot_utils import save_rotation_check
-                # Extraemos el primer ejemplo del batch y lo pasamos a numpy
-                # Recordamos que 'nodes' y 'nodes_rotated' vienen del generador modificado
-                n_orig = batch['nodes'][0].detach().cpu().numpy()
-                n_rot = batch['nodes_rotated'][0].detach().cpu().numpy()
-                save_rotation_check(n_orig, n_rot, opts.save_dir)
-            #-------------------------------------------------------------------------------
-
-            # Move batch to device
-            batch = move_to(var=batch,device=opts.device)
-            
-            # Make predictions
-            output = model(batch)
-            
-            # Calculate training loss
-            loss = contrastive_loss(*output[:2])
-            
-            # Backpropagate
-            optimizer.zero_grad()
-            loss.backward()
-            grad_norms = clip_grad_norms(param_groups=optimizer.param_groups,max_norm=opts.max_grad_norm)
-            optimizer.step()
-
-            # Logging
-            if step % int(opts.log_step) == 0:
-                log_values(
-                    loss=loss,
-                    grad_norms=grad_norms,
-                    epoch=epoch,
-                    batch_id=batch_id,
-                    step=step,
-                    tb_logger=tb_logger,
-                    use_critic=opts.baseline == 'critic',
-                    debug=opts.debug
-                )
-            step += 1
-
-        # Measure training time and report results
-        epoch_duration = time.time() - start_time
-        print(f"Finished epoch {epoch}, took {time.strftime('%H:%M:%S', time.gmtime(epoch_duration))}")
-
-        # Save trained model
-        if (opts.cp_freq != 0 and epoch % opts.cp_freq == 0) or epoch == opts.epochs - 1:
-            save_checkpoint(
-                model=model,
-                optimizer=optimizer,
-                save_dir=opts.save_dir,
-                epoch=epoch
-            )
-            
-        # Perform validation
-        loss_val = validate(
-            model=model,
-            dataloader=val_dataloader,
-            loss_func=contrastive_loss,
-            device=opts.device
-        ).mean().item()
-
-        #dac
-        val_history.append(loss_val) # Guardar el valor en el historial
-
-        # Tensorboard info
-        if not opts.debug:
-            tb_logger.log_value(
-                name='val_avg_reward',
-                value=loss_val,
-                step=step
-            )
-
-        # Update lr_scheduler
-        lr_scheduler.step()
-    
-    # End training
-    if opts.use_distributed:
-        cleanup()
-    
-    #dac
-    from utils.plot_utils import save_training_results
-    label_name = 'Loss (Contrastive)'
-    save_training_results(val_history, label_name, opts.save_dir, 'training_performance')
-    
-    print('Finished')
-
+        # Guardar Checkpoint del Encoder
+        checkpoint_path = os.path.join(opts.save_dir, f'encoder-epoch-{epoch}.pt')
+        torch.save({
+            'init_embed': init_embed.state_dict(), 
+            'encoder': encoder.state_dict(),
+            'opts': vars(opts)
+        }, checkpoint_path)
 
 if __name__ == "__main__":
-    
-    # Get options
     opts = get_options()
-    
-    # Get number of GPUs
-    world_size = torch.cuda.device_count()
-    
-    # Main
-    if opts.use_cuda and opts.use_distributed and world_size > 1:
-        torch.multiprocessing.spawn(
-            main, args=(opts, world_size), nprocs=world_size
-        )
-    else:
-        main(opts=opts)
+    opts.pretrain = True # Aseguramos modo pretrain
+    run(opts)

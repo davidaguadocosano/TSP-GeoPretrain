@@ -1,0 +1,16 @@
+name: learning_tsp
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.7
+  - tqdm
+  - numpy
+  - scipy
+  - matplotlib
+  - pytorch
+  - torchvision
+  - pip
+  - pip:
+    - tensorboard_logger

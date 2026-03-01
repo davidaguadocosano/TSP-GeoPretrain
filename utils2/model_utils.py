@@ -1,10 +1,10 @@
 import os
 import json
 import torch
-from typing import Any, Tuple
+from typing import Any, Tuple, Union, Optional, List
 
 
-def get_inner_model(model: torch.nn.Module | torch.nn.DataParallel | torch.nn.parallel.DistributedDataParallel) -> torch.nn.Module:
+def get_inner_model(model: Union[torch.nn.Module, torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel]) -> torch.nn.Module:
     """
     Get the inner model from a DataParallel wrapper.
 
@@ -59,7 +59,7 @@ def load_module(module_path, module_dict, module_type, *args, **kwargs):
 
 
 def save_checkpoint(
-        model: torch.nn.Module | torch.nn.DataParallel,
+        model: Union[torch.nn.Module, torch.nn.DataParallel],
         optimizer: torch.optim.Optimizer,
         baseline: Any,
         save_dir: str,
@@ -183,7 +183,7 @@ def get_checkpoint(path: str, epoch: int | None = None) -> Tuple[str, str, int]:
     # Return checkpoint filename, checkpoint dirname, and next epoch
     return checkpoint_filename, checkpoint_dirname, epoch + 1
 """
-def get_checkpoint(path: str, epoch: int | None = None) -> Tuple[str, str, int]:
+def get_checkpoint(path: str, epoch: Optional[int] = None) -> Tuple[str, str, int]:
     """
     Determina si la ruta es un archivo o directorio y extrae el nombre del modelo y la siguiente época.
     """

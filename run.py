@@ -41,6 +41,9 @@ def _run_rl(opts):
     # Pretty print the run args
     pp.pprint(vars(opts))
 
+    if opts.val_datasets is None: #dac
+        opts.val_datasets = []
+
     # Set the random seed
     torch.manual_seed(opts.seed)
     np.random.seed(opts.seed)
@@ -106,6 +109,26 @@ def _run_rl(opts):
     if opts.use_cuda and torch.cuda.device_count() > 1:
         model = torch.nn.DataParallel(model)
         
+    #dac: mi pretrain solo tiene encoder, el decoder se debe aleatorizar
+    if opts.load_path is not None:
+        print(f'Cargando pesos desde {opts.load_path}...')
+        load_data = torch.load(opts.load_path, map_location=lambda storage, loc: storage)
+    
+        # Si el archivo viene de pretrain.py, solo cargamos Encoder e Init_Embed
+        if 'encoder' in load_data:
+            model.embedder.load_state_dict(load_data['encoder'])
+            model.init_embed.load_state_dict(load_data['init_embed'])
+            print(">>> Encoder pre-entrenado cargado. El Decoder se iniciará aleatoriamente.")
+
+            print(">>> Congelando Encoder para las primeras épocas...")
+            for param in model.embedder.parameters():
+                param.requires_grad = False
+            for param in model.init_embed.parameters():
+                param.requires_grad = False
+        else:
+            # Carga normal de modelo completo
+            model.load_state_dict(load_data['model'])
+
     # Compute number of network parameters
     print(model)
     nb_param = 0
@@ -203,6 +226,14 @@ def _run_rl(opts):
 
     # Start training loop
     for epoch in range(opts.epoch_start, opts.epoch_start + opts.n_epochs):
+        # dac: Liberamos el encoder en la época 5 para el fine-tuning final
+        if opts.load_path is not None and epoch == 5:
+            print("\n>>> Descongelando Encoder")
+            for param in model.embedder.parameters():
+                param.requires_grad = True
+            for param in model.init_embed.parameters():
+                param.requires_grad = True
+                
         train_epoch(
             model,
             optimizer,
@@ -295,8 +326,10 @@ def _run_sl(opts):
     print('Number of parameters: ', nb_param)
 
     # Overwrite model parameters by parameters to load
-    model_ = get_inner_model(model)
-    model_.load_state_dict({**model_.state_dict(), **load_data.get('model', {})})
+    # dac: Estas líneas intentan cargar 'model' de nuevo y podrían borrar la carga parcial del encoder si load_data['model'] está vacío.
+    # quizas hay que descomentarlas para cargar los modelos preentrenados por defecto (no mios).
+    #model_ = get_inner_model(model)
+    #model_.load_state_dict({**model_.state_dict(), **load_data.get('model', {})})
 
     # Initialize optimizer
     optimizer = optim.Adam([{'params': model.parameters(), 'lr': opts.lr_model}])

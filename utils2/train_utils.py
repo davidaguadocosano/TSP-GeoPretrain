@@ -3,10 +3,11 @@ import torch
 import argparse
 import numpy as np
 from tqdm import tqdm
-from typing import Any
+from typing import Union, Dict, Any
 from torch.utils.data import DataLoader
+from typing import Union, Any, Optional
 
-from utils.model_utils import get_inner_model
+from utils2.model_utils import get_inner_model
 
 
 def setup(rank, world_size):
@@ -27,7 +28,7 @@ def cleanup():
     torch.distributed.destroy_process_group()
 
 
-def move_to(var: dict | torch.Tensor, device: torch.types.Device) -> torch.Tensor | dict:
+def move_to(var: Union[dict, torch.Tensor], device: Any) -> Union[torch.Tensor, dict]:
     """
     Move tensor or dictionary of tensors to specified device.
 

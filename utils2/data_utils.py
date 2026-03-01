@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from typing import Tuple
+from typing import Tuple, Optional, Union, List
 
 
 def actions2numpy(actions, nodes, num_dirs=4, time_step=2e-2):
@@ -68,7 +68,7 @@ def generate_obstacles(min_obs: int = 5, max_obs: int = 10, r_max: float = 0.12,
 def generate_nodes(
     num_nodes: int,
     num_depots: int = 1,
-    obs: torch.Tensor | None = None,
+    obs: Optional[torch.Tensor] = None,
     image_size: int = 64) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Generate nodes.
