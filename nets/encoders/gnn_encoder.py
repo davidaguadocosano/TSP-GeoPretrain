@@ -43,6 +43,7 @@ class GNNLayer(nn.Module):
         self.B = nn.Linear(hidden_dim, hidden_dim, bias=True)
         self.C = nn.Linear(hidden_dim, hidden_dim, bias=True)
 
+        """
         self.norm_h = {
             "layer": nn.LayerNorm(hidden_dim, elementwise_affine=learn_norm),
             "batch": nn.BatchNorm1d(hidden_dim, affine=learn_norm, track_running_stats=track_norm)
@@ -52,6 +53,19 @@ class GNNLayer(nn.Module):
             "layer": nn.LayerNorm(hidden_dim, elementwise_affine=learn_norm),
             "batch": nn.BatchNorm1d(hidden_dim, affine=learn_norm, track_running_stats=track_norm)
         }.get(self.norm, None)
+        """
+        # dac: antes no guardaba en el .pt las capas de normalización
+        if self.norm == "layer" or self.norm is None: #quizas deberia quitarlo
+            print(f"DEBUG: Configurando capa LayerNorm en hidden_dim={hidden_dim}")
+            self.norm_h = nn.LayerNorm(hidden_dim, elementwise_affine=learn_norm)
+            self.norm_e = nn.LayerNorm(hidden_dim, elementwise_affine=learn_norm)
+        elif self.norm == "batch":
+            self.norm_h = nn.BatchNorm1d(hidden_dim, affine=learn_norm, track_running_stats=track_norm)
+            self.norm_e = nn.BatchNorm1d(hidden_dim, affine=learn_norm, track_running_stats=track_norm)
+        else:
+            self.norm_h = None
+            self.norm_e = None
+        
         
     def forward(self, h, e, graph):
         """

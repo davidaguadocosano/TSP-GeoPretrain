@@ -93,7 +93,12 @@ def get_options(args=None):
     parser.add_argument('--eval_only', action='store_true', 
                         help='Set this value to only evaluate model')
     parser.add_argument('--seed', type=int, default=1234, help='Random seed to use')
+    #dac
+    parser.add_argument('--freeze_epochs', type=int, default=0, help="Número de épocas para congelar el encoder (0 para no congelar)")
 
+    #dac: escoger cuantos tsp se hacen para comparar 2 modelos
+    parser.add_argument('--eval_size', type=int, default=1, help="Número de TSPs a resolver para calcular el coste medio (por defecto 1)")
+    
     # dac:  Pre-training / Contrastive Learning
     parser.add_argument('--pretrain', action='store_true', help='Enable pre-training mode')
     parser.add_argument('--cl_temp', type=float, default=0.07, 

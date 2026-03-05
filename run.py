@@ -227,11 +227,17 @@ def _run_rl(opts):
     # Start training loop
     for epoch in range(opts.epoch_start, opts.epoch_start + opts.n_epochs):
         # dac: Liberamos el encoder en la época 5 para el fine-tuning final
-        if opts.load_path is not None and epoch == 5:
-            print("\n>>> Descongelando Encoder")
+        if opts.load_path is not None and epoch < opts.freeze_epochs:
+            print(f"Época {epoch}: Encoder CONGELADO (Modo evaluación)")
+            model.embedder.eval()  # Pone las capas de normalización en modo eval
             for param in model.embedder.parameters():
-                param.requires_grad = True
-            for param in model.init_embed.parameters():
+                param.requires_grad = False
+        else:
+            if opts.load_path is not None and opts.freeze_epochs > 0:
+                print(f"Época {epoch}: Encoder LIBERADO (Modo entrenamiento)")
+    
+            model.embedder.train() #
+            for param in model.embedder.parameters():
                 param.requires_grad = True
                 
         train_epoch(

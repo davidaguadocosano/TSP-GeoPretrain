@@ -37,59 +37,102 @@ def load_model_custom(path, opts, device):
     model.set_decode_type("greedy") 
     return model
 
-def plot_comparison(nodes, tour1, cost1, tour2, cost2, save_path):
-    nodes = nodes.cpu().numpy()[0]
-    # Extraer los tours (en este repo suelen venir en el tercer valor del return)
-    t1 = tour1[0].cpu().numpy()
-    t2 = tour2[0].cpu().numpy()
-    
-    fig, axes = plt.subplots(1, 2, figsize=(15, 7))
-    tours = [t1, t2]
-    costs = [cost1[0].item(), cost2[0].item()]
-    titles = ["Modelo 1 (Path 1)", "Modelo 2 (Path 2)"]
+def plot_comparison(nodes, tour1, cost1, tour2, cost2, filename, avg1=None, avg2=None, n_eval=1):
+    # nodes llega como [1, V, 2], lo convertimos a numpy para graficar
+    nodes = nodes[0].cpu().numpy()
+    tour1 = tour1.cpu().numpy()
+    tour2 = tour2.cpu().numpy()
 
-    for i, ax in enumerate(axes):
-        ax.scatter(nodes[:, 0], nodes[:, 1], c='red', s=40, zorder=2)
-        # Cerrar el ciclo para la visualización
-        full_tour = np.append(tours[i], tours[i][0])
-        path_coords = nodes[full_tour]
-        ax.plot(path_coords[:, 0], path_coords[:, 1], c='blue', linewidth=1.5, zorder=1)
-        ax.set_title(f"{titles[i]}\nCosto Total: {costs[i]:.4f}")
-        ax.set_aspect('equal')
+    fig, ax = plt.subplots(1, 2, figsize=(15, 7))
+
+    # Títulos dinámicos basados en si hay evaluación por lote o no
+    title1 = f"Modelo 1 | Coste: {cost1:.4f}"
+    title2 = f"Modelo 2 | Coste: {cost2:.4f}"
+    
+    if n_eval > 1:
+        title1 += f"\nMedia ({n_eval} TSPs): {avg1:.4f}"
+        title2 += f"\nMedia ({n_eval} TSPs): {avg2:.4f}"
+
+    for i, (tour, cost, title) in enumerate([(tour1, cost1, title1), (tour2, cost2, title2)]):
+        # Dibujar nodos
+        ax[i].scatter(nodes[:, 0], nodes[:, 1], c='red', zorder=2)
+        
+        # Dibujar la ruta (unimos el último nodo con el primero para cerrar el tour)
+        tour_nodes = nodes[tour]
+        tour_nodes = np.vstack([tour_nodes, tour_nodes[0]])
+        ax[i].plot(tour_nodes[:, 0], tour_nodes[:, 1], c='blue', linewidth=1, zorder=1)
+        
+        ax[i].set_title(title, fontsize=12, fontweight='bold')
+        ax[i].set_aspect('equal')
+        ax[i].grid(True, linestyle='--', alpha=0.6)
 
     plt.tight_layout()
-    plt.savefig(save_path)
-    print(f"[*] Comparación guardada en: {save_path}")
+    plt.savefig(filename, dpi=300)
+    print(f"[*] Imagen guardada con estadísticas en: {filename}")
+    plt.close()
 
 def run_comparison(opts):
     device = torch.device("cuda:0" if opts.use_cuda and torch.cuda.is_available() else "cpu")
     
-    path1 = opts.load_path 
-    path2 = opts.resume 
-    
-    model1 = load_model_custom(path1, opts, device)
-    model2 = load_model_custom(path2, opts, device)
+    # 1. Cargar modelos
+    model1 = load_model_custom(opts.load_path, opts, device)
+    model2 = load_model_custom(opts.resume, opts, device)
 
-    # 2. Generar nodos
-    #torch.manual_seed(42)
-    num_nodes = opts.min_size #50
-    nodes = torch.rand(1, num_nodes, 2).to(device)
-
-    # 3. GENERAR EL GRAFO (Esto es lo que faltaba)
-    # GNN necesita saber qué nodos están conectados con cuáles
-    # Usamos los parámetros que vienen en opts (neighbors y knn_strat)
-    print("Generando grafo k-NN para el modelo GNN...")
-    graph_data = nearest_neighbor_graph(nodes[0].cpu(), opts.neighbors, opts.knn_strat)
-    # Cambiamos ByteTensor por un tensor booleano para evitar avisos de deprecación
-    graph = torch.tensor(graph_data).to(device).bool().unsqueeze(0)
+    # 2. Configuración y Generación de Nodos en Lote (Batch)
+    num_nodes = opts.min_size
+    eval_size = opts.eval_size  # Obtenido del terminal (por defecto 1)
     
-    # 4. PASAR AMBOS al modelo
+    print(f"Generando {eval_size} instancias de TSP con {num_nodes} nodos...")
+    # Generamos un tensor de tamaño [eval_size, num_nodes, 2]
+    # Esto crea 'eval_size' problemas diferentes de una sola vez
+    nodes = torch.rand(eval_size, num_nodes, 2).to(device)
+
+    # 3. Generar los Grafos k-NN para todo el lote
+    print(f"Generando grafos k-NN para las {eval_size} instancias...")
+    batch_graphs = []
+    for i in range(eval_size):
+        # Procesamos cada instancia para crear su matriz de adyacencia
+        g_data = nearest_neighbor_graph(nodes[i].cpu(), opts.neighbors, opts.knn_strat)
+        batch_graphs.append(torch.tensor(g_data).bool())
+    
+    # Apilamos los grafos en un solo tensor de [eval_size, num_nodes, num_nodes]
+    graphs = torch.stack(batch_graphs).to(device)
+    
+    # 4. Inferencia: Resolvemos todos los problemas a la vez
     with torch.no_grad():
-        # Ahora pasamos (nodes, graph)
-        cost1, _, tour1 = model1(nodes, graph, return_pi=True)
-        cost2, _, tour2 = model2(nodes, graph, return_pi=True)
+        # El AttentionModel procesa el batch completo [eval_size, ...] 
+        # y devuelve tensores con todos los costes y rutas
+        costs1, _, tours1 = model1(nodes, graphs, return_pi=True)
+        costs2, _, tours2 = model2(nodes, graphs, return_pi=True)
 
-    plot_comparison(nodes, tour1, cost1, tour2, cost2, "comparativa_modelos.png")
+    # 5. Calcular Medias y preparar Visualización
+    avg_cost1 = costs1.mean().item()
+    avg_cost2 = costs2.mean().item()
+    
+    # Extraemos solo la PRIMERA instancia para el dibujo
+    # Usamos .item() para convertir los tensores en números normales
+    current_cost1 = costs1[0].item()
+    current_cost2 = costs2[0].item()
+    
+    # Pasamos solo los datos del primer TSP a la función de dibujo
+    # Pero ahora incluimos las medias en el título o etiquetas
+    print(f"\nResultados sobre {eval_size} instancias:")
+    print(f"Modelo 1 - Media: {avg_cost1:.4f} | Actual: {current_cost1:.4f}")
+    print(f"Modelo 2 - Media: {avg_cost2:.4f} | Actual: {current_cost2:.4f}")
+
+    # Modificamos ligeramente la llamada al plot para pasar las medias si quieres
+    # (O simplemente usa los costes actuales para mantener la imagen limpia)
+    plot_comparison(
+        nodes[0:1], # Solo el primer conjunto de nodos [1, V, 2]
+        tours1[0],  # Solo la primera ruta del modelo 1
+        current_cost1, 
+        tours2[0],  # Solo la primera ruta del modelo 2
+        current_cost2, 
+        "comparativa_modelos.png",
+        avg1=avg_cost1, # Puedes añadir estos argumentos a tu función plot_comparison
+        avg2=avg_cost2,
+        n_eval=eval_size
+    )
 
 if __name__ == "__main__":
     opts = get_options()
