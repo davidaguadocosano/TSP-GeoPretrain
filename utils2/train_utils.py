@@ -43,10 +43,35 @@ def move_to(var: Union[dict, torch.Tensor], device: Any) -> Union[torch.Tensor, 
         return {k: move_to(v, device) for k, v in var.items()}
     return var.to(device)
 
-
+#dac: modifico funcion para que a parted e bajar como a poco el lr, tb empieze con lr bajo los 1000 primeros pasos
 def load_lr_scheduler(optimizer: torch.optim.Optimizer, lr_decay: int = 1) -> torch.optim.lr_scheduler.LambdaLR:
-    """Load the learning rate scheduler for the optimizer."""
+    #Load the learning rate scheduler for the optimizer.
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: lr_decay ** epoch)
+
+#dac: empezar con lr bajo las primeras epocas
+def adjust_learning_rate_manual(optimizer, epoch, opts):
+    """
+    Ajusta el LR manualmente:
+    - Épocas 0-4: Warmup (sube desde un valor bajo hasta el del terminal).
+    - Épocas 5-50: Valor del terminal (con el decaimiento que elijas).
+    """
+    warmup_epochs = 5
+    
+    if epoch < warmup_epochs:
+        # RAMP UP: Empezamos en el 20% y llegamos al 100% en la época 5
+        # Época 0: 0.2 * LR | Época 4: 1.0 * LR
+        factor = 0.2 + 0.8 * (epoch / warmup_epochs)
+        lr = opts.lr_model * factor
+    else:
+        # POST-WARMUP: Usamos el LR del terminal con un decaimiento muy suave
+        # para que no se muera en la época 10.
+        lr = opts.lr_model #* (opts.lr_decay ** (epoch - warmup_epochs))
+
+    # Aplicamos el nuevo LR al optimizador
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+        
+    return lr
 
 
 def load_optimizer(opts: argparse.Namespace, model: torch.nn.Module, baseline: Any, checkpoint: dict = None) -> torch.optim.Optimizer:

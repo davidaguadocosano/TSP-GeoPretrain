@@ -37,7 +37,7 @@ def load_model_custom(path, opts, device):
     model.set_decode_type("greedy") 
     return model
 
-def plot_comparison(nodes, tour1, cost1, tour2, cost2, filename, avg1=None, avg2=None, n_eval=1):
+def plot_comparison(nodes, tour1, cost1, tour2, cost2, filename, avg1=None, ci1=None, avg2=None, ci2=None, n_eval=1):
     # nodes llega como [1, V, 2], lo convertimos a numpy para graficar
     nodes = nodes[0].cpu().numpy()
     tour1 = tour1.cpu().numpy()
@@ -50,8 +50,8 @@ def plot_comparison(nodes, tour1, cost1, tour2, cost2, filename, avg1=None, avg2
     title2 = f"Modelo 2 | Coste: {cost2:.4f}"
     
     if n_eval > 1:
-        title1 += f"\nMedia ({n_eval} TSPs): {avg1:.4f}"
-        title2 += f"\nMedia ({n_eval} TSPs): {avg2:.4f}"
+        title1 += f"\nMedia ({n_eval} TSPs): {avg1:.4f} ± {ci1:.4f} (95% CI)"
+        title2 += f"\nMedia ({n_eval} TSPs): {avg2:.4f} ± {ci2:.4f} (95% CI)"
 
     for i, (tour, cost, title) in enumerate([(tour1, cost1, title1), (tour2, cost2, title2)]):
         # Dibujar nodos
@@ -106,9 +106,22 @@ def run_comparison(opts):
         costs2, _, tours2 = model2(nodes, graphs, return_pi=True)
 
     # 5. Calcular Medias y preparar Visualización
+    n = costs1.size(0) # eval_size, para intervalo confianza
     avg_cost1 = costs1.mean().item()
     avg_cost2 = costs2.mean().item()
+
+    # Calculamos la desviación estándar muestral (unbiased)
+    std1 = costs1.std().item()
+    std2 = costs2.std().item()
+
+    # Error Estándar de la Media (SEM)
+    sem1 = std1 / (n**0.5)
+    sem2 = std2 / (n**0.5)
     
+    # Intervalo de Confianza del 95% (Z ≈ 1.96 para n suficientemente grande)
+    ci1 = 1.96 * sem1
+    ci2 = 1.96 * sem2
+
     # Extraemos solo la PRIMERA instancia para el dibujo
     # Usamos .item() para convertir los tensores en números normales
     current_cost1 = costs1[0].item()
@@ -117,8 +130,8 @@ def run_comparison(opts):
     # Pasamos solo los datos del primer TSP a la función de dibujo
     # Pero ahora incluimos las medias en el título o etiquetas
     print(f"\nResultados sobre {eval_size} instancias:")
-    print(f"Modelo 1 - Media: {avg_cost1:.4f} | Actual: {current_cost1:.4f}")
-    print(f"Modelo 2 - Media: {avg_cost2:.4f} | Actual: {current_cost2:.4f}")
+    print(f"Modelo 1 - Media: {avg_cost1:.4f} ± {ci1:.4f} (95% CI) | Actual: {current_cost1:.4f}")
+    print(f"Modelo 2 - Media: {avg_cost2:.4f} ± {ci2:.4f} (95% CI) | Actual: {current_cost2:.4f}")
 
     # Modificamos ligeramente la llamada al plot para pasar las medias si quieres
     # (O simplemente usa los costes actuales para mantener la imagen limpia)
@@ -129,9 +142,9 @@ def run_comparison(opts):
         tours2[0],  # Solo la primera ruta del modelo 2
         current_cost2, 
         "comparativa_modelos.png",
-        avg1=avg_cost1, # Puedes añadir estos argumentos a tu función plot_comparison
-        avg2=avg_cost2,
-        n_eval=eval_size
+        avg1=avg_cost1, ci1=ci1,
+        avg2=avg_cost2, ci2=ci2,
+        n_eval=n
     )
 
 if __name__ == "__main__":

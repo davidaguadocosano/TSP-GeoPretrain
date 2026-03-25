@@ -107,6 +107,8 @@ def get_options(args=None):
                         help='Dimension of the projection head MLP')
     parser.add_argument('--use_distributed', action='store_true', 
                         help='Enable Distributed Data Parallel (DDP) for pre-training')
+   
+    parser.add_argument('--pretrain_type', type=str, default='rotation', choices=['rotation', 'symmetry'], help="Estrategia de pre-entrenamiento")
 
     # Misc
     parser.add_argument('--num_workers', type=int, default=0,

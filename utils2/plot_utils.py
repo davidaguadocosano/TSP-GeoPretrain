@@ -49,11 +49,11 @@ def plot_tsp(actions: np.ndarray, batch: dict, reward: int = 0) -> None:
 
 #dac
 import os
-
-def save_rotation_check(nodes, rotated_nodes, save_dir):
-    """
-    Guarda una imagen comparativa del grafo original y el rotado.
-    """
+"""
+def save_transformation_check(nodes, rotated_nodes, save_dir): # era save_rotation_check
+    
+    # Guarda una imagen comparativa del grafo original y el rotado.
+    
     # Usar el backend 'Agg' para que no intente abrir una ventana (necesario para SSH)
     import matplotlib
     matplotlib.use('Agg')
@@ -72,7 +72,8 @@ def save_rotation_check(nodes, rotated_nodes, save_dir):
     # Graficar Original
     ax1.scatter(nodes[:, 0], nodes[:, 1], c='blue', label='Original')
     ax1.set_title("Grafo Original")
-    
+  """  
+"""
     # Graficar Rotado
     ax2.scatter(rotated_nodes[:, 0], rotated_nodes[:, 1], c='green', label='Rotado')
     ax2.set_title("Grafo Rotado")
@@ -85,6 +86,72 @@ def save_rotation_check(nodes, rotated_nodes, save_dir):
     plt.savefig(output_path)
     plt.close()
     print(f"\n[*] Visualización de rotación guardada en: {output_path}")
+    """
+"""
+    # Grafo Transformado (Dinámico)
+    color = 'green' if transform_type == "rotation" else 'purple'
+    label_title = "Grafo Rotado" if transform_type == "rotation" else "Grafo Reflejado"
+    
+    ax2.scatter(transformed_nodes[:, 0], transformed_nodes[:, 1], c=color, label=label_title)
+    ax2.set_title(label_title)
+
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    
+    # Nombre de archivo dinámico para no sobrescribir tests diferentes
+    output_path = os.path.join(save_dir, f'{transform_type}_test.png')
+    plt.savefig(output_path)
+    plt.close()
+    print(f"\n[*] Visualización de {transform_type} guardada en: {output_path}")
+"""
+
+def save_transformation_check(nodes, transformed_nodes, save_dir, transform_type="rotation", epoch=0, angle=None):
+    """
+    Guarda una imagen comparativa del grafo original y el transformado.
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import os
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+    
+    for ax in [ax1, ax2]:
+        ax.set_xlim([-0.1, 1.1])
+        ax.set_ylim([-0.1, 1.1])
+        ax.set_aspect('equal')
+        ax.plot(0.5, 0.5, 'rx') 
+
+        # DIBUJAR EL EJE (Solo si es simetría y tenemos el ángulo)
+        if transform_type == "symmetry" and angle is not None:
+            # Calculamos dos puntos alejados para trazar la línea que pase por el centro
+            # El eje tiene un ángulo 'angle'
+            r = 0.7  # Longitud de la línea desde el centro
+            x1 = 0.5 + r * np.cos(angle)
+            y1 = 0.5 + r * np.sin(angle)
+            x2 = 0.5 - r * np.cos(angle)
+            y2 = 0.5 - r * np.sin(angle)
+            
+            # Dibujamos en ambos subplots para comparar
+            ax.plot([x1, x2], [y1, y2], color='black', linestyle='--', alpha=0.5, label='Eje de simetría')
+
+    # Graficar Original
+    ax1.scatter(nodes[:, 0], nodes[:, 1], c='blue', label='Original')
+    ax1.set_title("Grafo Original")
+    
+    # Graficar Transformado
+    label_v2 = "Reflejado" if transform_type == "symmetry" else "Rotado"
+    ax2.scatter(transformed_nodes[:, 0], transformed_nodes[:, 1], c='green', label=label_v2)
+    ax2.set_title(f"Grafo {label_v2}")
+
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    
+    # Nombre de archivo dinámico
+    output_path = os.path.join(save_dir, f'{transform_type}_epoch_{epoch}.png')
+    plt.savefig(output_path)
+    plt.close()
+    print(f"\n[*] Visualización de {transform_type} guardada en: {output_path}")
 
 #dac para visualizar los resultados en un png (al estar en ssh no se como ir visualizando la panatalla))
 def save_training_results(history, label, save_dir, filename):

@@ -19,18 +19,41 @@ from nets.encoders.mlp_encoder import MLPEncoder
 from utils import move_to, torch_load_cpu
 from utils.data_utils import BatchedRandomSampler
 
-from utils2.train_utils import set_dataparallel, setup, cleanup
+from utils2.train_utils import set_dataparallel, setup, cleanup, load_lr_scheduler
+from utils2.plot_utils import save_transformation_check
+import utils2.data_utils as data_utils
 
+"""
 def save_rotation_check(nodes_v1, nodes_v2, epoch, save_dir):
-    """
-    Guarda una imagen con el grafo original y el rotado lado a lado.
-    """
+    
+    # Guarda una imagen con el grafo original y el rotado lado a lado.
+    
     # Tomamos solo la primera muestra del batch y la movemos a CPU
     v1 = nodes_v1[0].cpu().numpy()
     v2 = nodes_v2[0].cpu().numpy()
     
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     
+    # Título dinámico
+    title_v2 = "Rotado (v2)" if pretrain_type == 'rotation' else "Reflejado (v2)"
+    
+    for i, (coords, title) in enumerate([(v1, "Original (v1)"), (v2, title_v2)]):
+        axes[i].scatter(coords[:, 0], coords[:, 1], c='red', s=30)
+        axes[i].plot(coords[:, 0], coords[:, 1], c='blue', alpha=0.3)
+        axes[i].set_title(title)
+        axes[i].set_xlim(-0.1, 1.1)
+        axes[i].set_ylim(-0.1, 1.1)
+        axes[i].set_aspect('equal')
+
+    plt.suptitle(f"Chequeo {pretrain_type.capitalize()} - Época {epoch}")
+    
+    filename = f"{pretrain_type}_check_epoch_{epoch}.png"
+    save_path = os.path.join(save_dir, filename)
+    plt.savefig(save_path)
+    plt.close()
+    print(f"[*] Imagen de control guardada en: {save_path}")
+    """
+"""
     # Dibujamos los puntos y conectamos en orden (para ver mejor la rotación)
     for i, (coords, title) in enumerate([(v1, "Original (v1)"), (v2, "Rotado (v2)")]):
         axes[i].scatter(coords[:, 0], coords[:, 1], c='red', s=30)
@@ -47,6 +70,7 @@ def save_rotation_check(nodes_v1, nodes_v2, epoch, save_dir):
     plt.savefig(save_path)
     plt.close()
     print(f"[*] Imagen de control guardada en: {save_path}")
+    """
 
 class ProjectionHead(nn.Module):
     """Cabeza de proyección MLP para aprendizaje contrastivo (estilo SimCLR)"""
@@ -77,19 +101,40 @@ def info_nce_loss(z1, z2, temp=0.07):
     loss = F.cross_entropy(logits, labels)
     return loss
 
-def train_epoch(init_embed,encoder, projector, optimizer, dataloader, epoch, tb_logger, opts):
+def train_epoch(init_embed,encoder, projector, optimizer, dataloader, epoch, tb_logger, opts, lr_scheduler):
     init_embed.train() #nuevo
     encoder.train()
     projector.train()
     
     total_loss = 0
     step = epoch * (opts.epoch_size // opts.batch_size)
-
+    # quito esto para que genere un angulo por grafo y no por epoch
+    # angle_rad = torch.rand(1).to(opts.device) * np.pi
     pbar = tqdm(dataloader, desc=f"Epoch {epoch}")
     for batch_id, batch in enumerate(pbar):
+        # Si es simetría, recalculamos v2_nodes antes de mover a GPU. 
+        #angle_rad = torch.rand(1) * 2 * np.pi
+
+        # angulo aleatorio por cada grafo del batch
+        curr_batch_size = batch['nodes_v1'].size(0)
+        angles = torch.rand(curr_batch_size) * np.pi
+        if opts.pretrain_type == 'symmetry':
+            
+            batch['nodes_v2'] = data_utils.reflect_nodes(batch['nodes_v1'], angles) #antes angle_rad
+            # Como la reflexión es una isometría, el grafo k-NN original sigue siendo válido
+            batch['graph_v2'] = batch['graph_v1']
         
         if epoch == 0 and batch_id == 0:
-            save_rotation_check(batch['nodes_v1'], batch['nodes_v2'], epoch, opts.save_dir)
+            #save_transformation_check(batch['nodes_v1'], batch['nodes_v2'], opts.save_dir) #quie epoch
+            save_transformation_check(
+                batch['nodes_v1'][0], 
+                batch['nodes_v2'][0], 
+                opts.save_dir, 
+                opts.pretrain_type, 
+                epoch,
+                angle=angles[0].item() if opts.pretrain_type == 'symmetry' else None
+                #angle=angles.item() if opts.pretrain_type == 'symmetry' else None #antes angle_rad[0].item
+            )
 
         # Mover datos a GPU
         v1_nodes = move_to(batch['nodes_v1'], opts.device)
@@ -119,6 +164,12 @@ def train_epoch(init_embed,encoder, projector, optimizer, dataloader, epoch, tb_
         nn.utils.clip_grad_norm_(encoder.parameters(), opts.max_grad_norm)
         optimizer.step()
 
+        # dac: ACTIVAR EL SCHEDULER EN CADA BATCH
+        lr_scheduler.step()
+        # dac: ver el LR actual en la barra de progreso
+        current_lr = optimizer.param_groups[0]['lr']
+        pbar.set_postfix(loss=loss.item(), lr=f"{current_lr:.2e}")
+
         total_loss += loss.item()
         
         # Log en TensorBoard
@@ -130,7 +181,24 @@ def train_epoch(init_embed,encoder, projector, optimizer, dataloader, epoch, tb_
 
 def run(opts):
     # Setup inicial idéntico a run.py
-    torch.manual_seed(opts.seed)
+    #torch.manual_seed(opts.seed)
+    # Si la semilla es None o menor que 0, usamos el reloj del sistema
+    if opts.seed <= 0:
+        import time
+        # El operador & 0xFFFFFFFF asegura que el número esté en el rango [0, 2**32-1]
+        seed = int(time.time() * 1000) & 0xFFFFFFFF
+        print(f"[*] Usando semilla dinámica del sistema: {seed}")
+    else:
+        seed = opts.seed
+        print(f"[*] Usando semilla fija: {seed}")
+
+    # Aplicamos la semilla a todas las librerías para consistencia
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    # ----------------------------------
+    
     opts.device = torch.device("cuda:0" if opts.use_cuda else "cpu")
     
     if not os.path.exists(opts.save_dir):
@@ -165,13 +233,32 @@ def run(opts):
     # 2. Instanciar Cabeza de Proyección
     projector = ProjectionHead(opts.embedding_dim, opts.cl_projector_dim).to(opts.device)
 
+    #dac: Cargar pesos pre-entrenados para pre-entrenamiento continuo
+    if opts.load_path is not None:
+        print(f'[*] Cargando pesos pre-entrenados para pre-entrenamiento continuo desde: {opts.load_path}')
+        # Cargamos el archivo (mapeando a la CPU/GPU correcta)
+        checkpoint = torch.load(opts.load_path, map_location=lambda storage, loc: storage)
+        
+        # Cargamos los estados en nuestros modelos actuales
+        init_embed.load_state_dict(checkpoint['init_embed'])
+        encoder.load_state_dict(checkpoint['encoder'])
+        
+        # Si el checkpoint guardó el proyector, también lo cargamos para no perder ese avance
+        if 'projector' in checkpoint:
+            projector.load_state_dict(checkpoint['projector'])
+            print("[*] Proyector cargado desde el checkpoint.")
+        
+        print("[*] Pesos del Encoder e Init_Embed cargados")
+
     # Optimizer
     optimizer = torch.optim.Adam(
         list(init_embed.parameters()) + list(encoder.parameters()) + list(projector.parameters()), 
         lr=opts.lr_model
     )
+    # 2. dac: INICIALIZAR EL SCHEDULER AQUÍ
+    lr_scheduler = load_lr_scheduler(optimizer, opts)
 
-    # 3. Cargar Dataset (Usa la nueva clase que añadimos)
+    # 3. Cargar Dataset (Usa la nueva clase que añadi)
     dataset = TSPPretrainDataset(
         min_size=opts.min_size,
         max_size=opts.max_size,
@@ -192,7 +279,7 @@ def run(opts):
 
     # Bucle de entrenamiento
     for epoch in range(opts.n_epochs):
-        train_epoch(init_embed, encoder, projector, optimizer, dataloader, epoch, tb_logger, opts)
+        train_epoch(init_embed, encoder, projector, optimizer, dataloader, epoch, tb_logger, opts, lr_scheduler) #dac: añadi lr_scheduler
         
         # Guardar Checkpoint del Encoder
         checkpoint_path = os.path.join(opts.save_dir, f'encoder-epoch-{epoch}.pt')
