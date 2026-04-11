@@ -115,32 +115,104 @@ def train_epoch(init_embed,encoder, projector, optimizer, dataloader, epoch, tb_
         # Si es simetría, recalculamos v2_nodes antes de mover a GPU. 
         #angle_rad = torch.rand(1) * 2 * np.pi
 
-        # angulo aleatorio por cada grafo del batch
+        #dac: añadir ambos pretrains
         curr_batch_size = batch['nodes_v1'].size(0)
-        angles = torch.rand(curr_batch_size) * np.pi
-        if opts.pretrain_type == 'symmetry':
+        angles_rot = torch.rand(curr_batch_size) * 2 * np.pi
+        angles_sym = torch.rand(curr_batch_size) * np.pi
+
+        if opts.pretrain_type == 'rot+sym':
+            choice = torch.randint(0, 3, (curr_batch_size,))
+            # FORZAMOS CLONE DESDE V1 para ignorar cualquier rotación del Dataset
+            v2_nodes = batch['nodes_v1'].clone()
             
-            batch['nodes_v2'] = data_utils.reflect_nodes(batch['nodes_v1'], angles) #antes angle_rad
-            # Como la reflexión es una isometría, el grafo k-NN original sigue siendo válido
+            mask_rot = (choice == 0) | (choice == 2)
+            mask_sym = (choice == 1) | (choice == 2)
+            
+            if mask_rot.any():
+                v2_nodes[mask_rot] = data_utils.rotate_nodes(v2_nodes[mask_rot], angles_rot[mask_rot])
+            if mask_sym.any():
+                # IMPORTANTE: Aquí pasamos shuffle=True para que el modelo aprenda
+                v2_nodes[mask_sym] = data_utils.reflect_nodes(v2_nodes[mask_sym], angles_sym[mask_sym], shuffle=True)
+            
+            batch['nodes_v2'] = v2_nodes
             batch['graph_v2'] = batch['graph_v1']
-        
+
+        # --- Lógica de Traslación ---
+        if opts.pretrain_type == 'translation':
+            curr_batch_size = batch['nodes_v1'].size(0)
+            # Ángulo aleatorio 0-360º
+            angles_trans = torch.rand(curr_batch_size) * 2 * np.pi
+            # Distancia corta (máximo 0.15) para no "perder" el grafo
+            dist_trans = torch.rand(curr_batch_size) * 0.15 
+            
+            batch['nodes_v2'] = data_utils.translate_nodes(batch['nodes_v1'], angles_trans, dist_trans)
+            batch['graph_v2'] = batch['graph_v1']
+
+        # --- BLOQUE DE VISUALIZACIÓN DE DEBUG ---
         if epoch == 0 and batch_id == 0:
-            #save_transformation_check(batch['nodes_v1'], batch['nodes_v2'], opts.save_dir) #quie epoch
-            save_transformation_check(
-                batch['nodes_v1'][0], 
-                batch['nodes_v2'][0], 
-                opts.save_dir, 
-                opts.pretrain_type, 
-                epoch,
-                angle=angles[0].item() if opts.pretrain_type == 'symmetry' else None
-                #angle=angles.item() if opts.pretrain_type == 'symmetry' else None #antes angle_rad[0].item
-            )
+            if opts.pretrain_type == 'rot+sym':
+                # Buscamos índices para cada caso en el batch
+                idx_rot = (choice == 0).nonzero(as_tuple=True)[0]
+                idx_sym = (choice == 1).nonzero(as_tuple=True)[0]
+                idx_both = (choice == 2).nonzero(as_tuple=True)[0]
+
+                # 1. Caso Solo Rotación
+                if len(idx_rot) > 0:
+                    i = idx_rot[0].item()
+                    save_transformation_check(
+                        batch['nodes_v1'][i], batch['nodes_v2'][i], 
+                        opts.save_dir, "ROTACION", epoch
+                    )
+                
+                # 2. Caso Solo Simetría (Generamos versión sin shuffle para confirmar el eje)
+                if len(idx_sym) > 0:
+                    i = idx_sym[0].item()
+                    v2_no_shuffle = data_utils.reflect_nodes(batch['nodes_v1'][i:i+1], angles_sym[i], shuffle=False)
+                    save_transformation_check(
+                        batch['nodes_v1'][i], v2_no_shuffle[0], 
+                        opts.save_dir, "SIMETRIA", epoch, angle=angles_sym[i].item()
+                    )
+                
+                # 3. Caso Rotación + Simetría (Sin shuffle para confirmar composición)
+                if len(idx_both) > 0:
+                    i = idx_both[0].item()
+                    v2_step1 = data_utils.rotate_nodes(batch['nodes_v1'][i:i+1], angles_rot[i])
+                    v2_debug_both = data_utils.reflect_nodes(v2_step1, angles_sym[i], shuffle=False)
+                    save_transformation_check(
+                        batch['nodes_v1'][i], v2_debug_both[0], 
+                        opts.save_dir, "ROT+SYM", epoch, angle=angles_sym[i].item()
+                    )
+            
+            if opts.pretrain_type == 'translation':
+                save_transformation_check(
+                    batch['nodes_v1'][0], 
+                    batch['nodes_v2'][0], 
+                    opts.save_dir, "TRANSLATION", epoch
+                )
+            
+            else:
+                # Caso cuando NO es rot+sym (es rotation o symmetry puro)
+                a = None
+                if opts.pretrain_type == 'symmetry':
+                    # Para symmetry puro, generamos uno sin shuffle para la foto
+                    a = angles_sym[0].item()
+                    v2_img = data_utils.reflect_nodes(batch['nodes_v1'][0:1], angles_sym[0], shuffle=False)[0]
+                else:
+                    v2_img = batch['nodes_v2'][0]
+                
+                save_transformation_check(
+                    batch['nodes_v1'][0], v2_img, 
+                    opts.save_dir, opts.pretrain_type, epoch, angle=a
+                )
+
 
         # Mover datos a GPU
         v1_nodes = move_to(batch['nodes_v1'], opts.device)
         v1_graph = move_to(batch['graph_v1'], opts.device)
         v2_nodes = move_to(batch['nodes_v2'], opts.device)
         v2_graph = move_to(batch['graph_v2'], opts.device)
+        #por defecto nodes_v1 y nodes_v2 son el grafo normal y el rotado. ya que la rotación en su momento
+        #la hice en problems/tsp/problem_tsp.py. un lio, pero funciona
 
         optimizer.zero_grad()
 
@@ -256,7 +328,11 @@ def run(opts):
         lr=opts.lr_model
     )
     # 2. dac: INICIALIZAR EL SCHEDULER AQUÍ
-    lr_scheduler = load_lr_scheduler(optimizer, opts)
+    #lr_scheduler = load_lr_scheduler(optimizer, opts)
+    lr_scheduler = load_lr_scheduler(
+        optimizer=optimizer,
+        lr_decay=opts.lr_decay
+    )
 
     # 3. Cargar Dataset (Usa la nueva clase que añadi)
     dataset = TSPPretrainDataset(

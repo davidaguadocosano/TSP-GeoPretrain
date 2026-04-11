@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  tsp-app:
+    build: .
+    container_name: learning_tsp_container
+    volumes:
+      - .:/app  # <--- ESTA ES LA CLAVE: Tu PC actual (.) se mapea a /app en el Docker
+    working_dir: /app
+    tty: true   # Permite que el contenedor se quede abierto
+    stdin_open: true
+    # Por defecto no ejecuta nada pesado, así puedes entrar tú a lanzar scripts
+    command: bash

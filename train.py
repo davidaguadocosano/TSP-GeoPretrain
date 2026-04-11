@@ -13,7 +13,7 @@ from torch.nn import DataParallel
 from utils.log_utils import log_values, log_values_sl
 from utils.data_utils import BatchedRandomSampler
 from utils import move_to
-
+from utils2.train_utils import adjust_learning_rate_manual
 
 def get_inner_model(model):
     return model.module if isinstance(model, DataParallel) else model
@@ -85,10 +85,12 @@ def clip_grad_norms(param_groups, max_norm=math.inf):
 
 
 def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_datasets, problem, tb_logger, opts):
-    print("\nStart train epoch {}, lr={} for run {}".format(epoch, optimizer.param_groups[0]['lr'], opts.run_name))
+    
     step = epoch * (opts.epoch_size // opts.batch_size)
     start_time = time.time()
-
+    current_lr = adjust_learning_rate_manual(optimizer, epoch, opts) # dac: empezar con menos lr
+    print("\nStart train epoch {}, lr={} for run {}".format(epoch, optimizer.param_groups[0]['lr'], opts.run_name))
+   
     if not opts.no_tensorboard:
         tb_logger.log_value('learnrate_pg0', optimizer.param_groups[0]['lr'], step)
 
@@ -121,9 +123,10 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_datasets, p
             opts
         )
 
+        #lr_scheduler.step()
+
         step += 1
     
-    lr_scheduler.step(epoch)
 
     epoch_duration = time.time() - start_time
     print("Finished epoch {}, took {} s".format(epoch, time.strftime('%H:%M:%S', time.gmtime(epoch_duration))))
@@ -220,9 +223,11 @@ def train_epoch_sl(model, optimizer, lr_scheduler, epoch, train_dataset, val_dat
             opts
         )
 
+        lr_scheduler.step()
+        
         step += 1
     
-    lr_scheduler.step(epoch)
+    
 
     epoch_duration = time.time() - start_time
     print("Finished epoch {}, took {} s".format(epoch, time.strftime('%H:%M:%S', time.gmtime(epoch_duration))))

@@ -49,70 +49,22 @@ def plot_tsp(actions: np.ndarray, batch: dict, reward: int = 0) -> None:
 
 #dac
 import os
-"""
-def save_transformation_check(nodes, rotated_nodes, save_dir): # era save_rotation_check
-    
-    # Guarda una imagen comparativa del grafo original y el rotado.
-    
-    # Usar el backend 'Agg' para que no intente abrir una ventana (necesario para SSH)
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
-    
-    # Configuración de los ejes
-    for ax in [ax1, ax2]:
-        ax.set_xlim([-0.1, 1.1])
-        ax.set_ylim([-0.1, 1.1])
-        ax.set_aspect('equal')
-        # Dibujar el centro de rotación (0.5, 0.5) para referencia
-        ax.plot(0.5, 0.5, 'rx') 
-
-    # Graficar Original
-    ax1.scatter(nodes[:, 0], nodes[:, 1], c='blue', label='Original')
-    ax1.set_title("Grafo Original")
-  """  
-"""
-    # Graficar Rotado
-    ax2.scatter(rotated_nodes[:, 0], rotated_nodes[:, 1], c='green', label='Rotado')
-    ax2.set_title("Grafo Rotado")
-
-    # Guardar
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-    
-    output_path = os.path.join(save_dir, 'rotation_test.png')
-    plt.savefig(output_path)
-    plt.close()
-    print(f"\n[*] Visualización de rotación guardada en: {output_path}")
-    """
-"""
-    # Grafo Transformado (Dinámico)
-    color = 'green' if transform_type == "rotation" else 'purple'
-    label_title = "Grafo Rotado" if transform_type == "rotation" else "Grafo Reflejado"
-    
-    ax2.scatter(transformed_nodes[:, 0], transformed_nodes[:, 1], c=color, label=label_title)
-    ax2.set_title(label_title)
-
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-    
-    # Nombre de archivo dinámico para no sobrescribir tests diferentes
-    output_path = os.path.join(save_dir, f'{transform_type}_test.png')
-    plt.savefig(output_path)
-    plt.close()
-    print(f"\n[*] Visualización de {transform_type} guardada en: {output_path}")
-"""
-
+""" No borrar, util capturas TFM.
 def save_transformation_check(nodes, transformed_nodes, save_dir, transform_type="rotation", epoch=0, angle=None):
-    """
-    Guarda una imagen comparativa del grafo original y el transformado.
-    """
+    #Guarda una imagen comparativa del grafo original y el transformado
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     import os
+    import numpy as np
+    import torch
+
+    # Convertir a numpy si son tensores
+    if isinstance(nodes, torch.Tensor):
+        nodes = nodes.detach().cpu().numpy()
+    if isinstance(transformed_nodes, torch.Tensor):
+        transformed_nodes = transformed_nodes.detach().cpu().numpy()
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
     
@@ -120,38 +72,93 @@ def save_transformation_check(nodes, transformed_nodes, save_dir, transform_type
         ax.set_xlim([-0.1, 1.1])
         ax.set_ylim([-0.1, 1.1])
         ax.set_aspect('equal')
-        ax.plot(0.5, 0.5, 'rx') 
+        ax.plot(0.5, 0.5, 'rx', markersize=10, label='Centro') 
 
-        # DIBUJAR EL EJE (Solo si es simetría y tenemos el ángulo)
-        if transform_type == "symmetry" and angle is not None:
-            # Calculamos dos puntos alejados para trazar la línea que pase por el centro
-            # El eje tiene un ángulo 'angle'
-            r = 0.7  # Longitud de la línea desde el centro
+        # DIBUJAR EL EJE: Si hay ángulo, dibujamos la línea del espejo
+        if angle is not None:
+            r = 0.7  # Radio de la línea
+            # El eje de simetría axial pasa por el centro (0.5, 0.5)
             x1 = 0.5 + r * np.cos(angle)
             y1 = 0.5 + r * np.sin(angle)
             x2 = 0.5 - r * np.cos(angle)
             y2 = 0.5 - r * np.sin(angle)
-            
-            # Dibujamos en ambos subplots para comparar
-            ax.plot([x1, x2], [y1, y2], color='black', linestyle='--', alpha=0.5, label='Eje de simetría')
+            ax.plot([x1, x2], [y1, y2], color='red', linestyle='--', alpha=0.6, label='Eje de simetría')
 
-    # Graficar Original
-    ax1.scatter(nodes[:, 0], nodes[:, 1], c='blue', label='Original')
-    ax1.set_title("Grafo Original")
+    # Graficar Original (Azul)
+    ax1.scatter(nodes[:, 0], nodes[:, 1], c='blue', edgecolors='black', s=50, alpha=0.7)
+    ax1.set_title(f"Original")
     
-    # Graficar Transformado
-    label_v2 = "Reflejado" if transform_type == "symmetry" else "Rotado"
-    ax2.scatter(transformed_nodes[:, 0], transformed_nodes[:, 1], c='green', label=label_v2)
-    ax2.set_title(f"Grafo {label_v2}")
+    # Graficar Transformado (Verde)
+    ax2.scatter(transformed_nodes[:, 0], transformed_nodes[:, 1], c='green', edgecolors='black', s=50, alpha=0.7)
+    ax2.set_title(f"Transformación: {transform_type}")
+
+    #ax1.legend()
+    #ax2.legend()
 
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     
-    # Nombre de archivo dinámico
-    output_path = os.path.join(save_dir, f'{transform_type}_epoch_{epoch}.png')
-    plt.savefig(output_path)
+    output_path = os.path.join(save_dir, f'CHECK_{transform_type}_ep{epoch}.png')
+    plt.savefig(output_path, bbox_inches='tight')
     plt.close()
-    print(f"\n[*] Visualización de {transform_type} guardada en: {output_path}")
+    print(f"[*] Visualización guardada: {output_path}")
+"""
+def save_transformation_check(nodes, transformed_nodes, save_dir, transform_type="rotation", epoch=0, angle=None):
+    """Guarda una imagen comparativa del grafo original y el transformado con marco de referencia."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    import os
+    import numpy as np
+    import torch
+
+    # Convertir a numpy si son tensores
+    if isinstance(nodes, torch.Tensor):
+        nodes = nodes.detach().cpu().numpy()
+    if isinstance(transformed_nodes, torch.Tensor):
+        transformed_nodes = transformed_nodes.detach().cpu().numpy()
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+    
+    # Límites ampliados para que quepa la traslación sin recortar
+    limit_min, limit_max = -0.2, 1.2
+
+    for ax in [ax1, ax2]:
+        ax.set_xlim([limit_min, limit_max])
+        ax.set_ylim([limit_min, limit_max])
+        ax.set_aspect('equal')
+        
+        # 1. Dibujar el marco original [0,1] como referencia
+        rect = patches.Rectangle((0, 0), 1, 1, linewidth=1, edgecolor='gray', facecolor='none', linestyle='--', alpha=0.5)
+        ax.add_patch(rect)
+        
+        # 2. Dibujar el centro original
+        ax.plot(0.5, 0.5, 'rx', markersize=8, alpha=0.5) 
+
+        # 3. Dibujar el eje (Solo para simetría)
+        if angle is not None:
+            r = 0.8 
+            x1, y1 = 0.5 + r * np.cos(angle), 0.5 + r * np.sin(angle)
+            x2, y2 = 0.5 - r * np.cos(angle), 0.5 - r * np.sin(angle)
+            ax.plot([x1, x2], [y1, y2], color='red', linestyle='--', alpha=0.6, label='Eje')
+
+    # Graficar Original (Azul)
+    ax1.scatter(nodes[:, 0], nodes[:, 1], c='blue', edgecolors='black', s=50, alpha=0.7)
+    ax1.set_title(f"Original")
+    
+    # Graficar Transformado (Verde)
+    ax2.scatter(transformed_nodes[:, 0], transformed_nodes[:, 1], c='green', edgecolors='black', s=50, alpha=0.7)
+    ax2.set_title(f"Transformación: {transform_type.upper()}")
+
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    
+    output_path = os.path.join(save_dir, f'CHECK_{transform_type}_ep{epoch}.png')
+    plt.savefig(output_path, bbox_inches='tight')
+    plt.close()
+    print(f"[*] Visualización guardada: {output_path}")
+
 
 #dac para visualizar los resultados en un png (al estar en ssh no se como ir visualizando la panatalla))
 def save_training_results(history, label, save_dir, filename):
@@ -215,7 +222,7 @@ def plot_tsp_solution(nodes, tour, save_path, title=None):
         title = f"Ruta TSP (Nodos: {len(np.unique(tour))})"
     
     plt.title(title)
-    plt.legend()
+    #plt.legend()
     plt.grid(True)
     plt.savefig(save_path)
     plt.close()

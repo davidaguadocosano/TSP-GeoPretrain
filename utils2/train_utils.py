@@ -43,9 +43,9 @@ def move_to(var: Union[dict, torch.Tensor], device: Any) -> Union[torch.Tensor, 
         return {k: move_to(v, device) for k, v in var.items()}
     return var.to(device)
 
-#dac: modifico funcion para que a parted e bajar como a poco el lr, tb empieze con lr bajo los 1000 primeros pasos
+#dac: modifico funcion para que a parted e bajar como a poco el lr, tb empieze con lr bajo los 1000 primeros pasos)
 def load_lr_scheduler(optimizer: torch.optim.Optimizer, lr_decay: int = 1) -> torch.optim.lr_scheduler.LambdaLR:
-    #Load the learning rate scheduler for the optimizer.
+    """Load the learning rate scheduler for the optimizer."""
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: lr_decay ** epoch)
 
 #dac: empezar con lr bajo las primeras epocas

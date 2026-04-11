@@ -72,6 +72,21 @@ def plot_comparison(nodes, tour1, cost1, tour2, cost2, filename, avg1=None, ci1=
     plt.close()
 
 def run_comparison(opts):
+
+    if opts.seed is not None and opts.seed != 1234:
+        seed = opts.seed
+        print(f"[*] Usando semilla fija: {seed}")
+    else:
+        # Generamos una semilla basada en el tiempo si no se especifica
+        import time
+        seed = int(time.time() * 1000) & 0xFFFFFFFF
+        print(f"[*] Generando escenario aleatorio (Semilla dinámica: {seed})")
+
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
     device = torch.device("cuda:0" if opts.use_cuda and torch.cuda.is_available() else "cpu")
     
     # 1. Cargar modelos

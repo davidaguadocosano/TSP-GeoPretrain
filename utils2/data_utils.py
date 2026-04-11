@@ -179,8 +179,9 @@ def generate_nodes(
     return nodes, depot_ini, depot_end, binary_map.permute(2, 0, 1)
 
 #dac
+"""
 def rotate_nodes(nodes: torch.Tensor, angle_deg: float) -> torch.Tensor:
-    """Rota las coordenadas de los nodos alrededor del centro (0.5, 0.5)"""
+    #Rota las coordenadas de los nodos alrededor del centro (0.5, 0.5)
     angle_rad = np.radians(angle_deg)
     cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
     
@@ -199,38 +200,53 @@ def rotate_nodes(nodes: torch.Tensor, angle_deg: float) -> torch.Tensor:
     if nodes.shape[-1] > 2:
         return torch.cat((rotated_coords, nodes[..., 2:]), dim=-1)
     return rotated_coords
+"""
+def rotate_nodes(nodes: torch.Tensor, angles) -> torch.Tensor:
+    """
+    Versión híbrida: Acepta un solo grafo [N, 2] con un float,
+    o un batch [B, N, 2] con un Tensor de ángulos.
+    """
+    # 1. Detectar si es un solo grafo o un batch
+    is_single = nodes.dim() == 2
+    if is_single:
+        nodes = nodes.unsqueeze(0)  # Convertimos [N, 2] -> [1, N, 2]
+
+    batch_size = nodes.shape[0]
+    device = nodes.device
+
+    # 2. Convertir 'angles' a tensor si es un float
+    if not isinstance(angles, torch.Tensor):
+        angles = torch.tensor([angles], device=device, dtype=nodes.dtype)
+    else:
+        angles = angles.to(device)
+
+    # 3. Preparar ángulos para el cálculo [B, 1, 1]
+    angles = angles.view(batch_size, 1, 1)
+    
+    cos_a = torch.cos(angles)
+    sin_a = torch.sin(angles)
+    
+    x = nodes[..., 0:1] - 0.5
+    y = nodes[..., 1:2] - 0.5
+    
+    new_x = x * cos_a - y * sin_a + 0.5
+    new_y = x * sin_a + y * cos_a + 0.5
+    
+    rotated = torch.cat([new_x, new_y], dim=-1)
+    if nodes.shape[-1] > 2:
+        rotated = torch.cat((rotated, nodes[..., 2:]), dim=-1)
+
+    # 4. Devolver al formato original
+    return rotated.squeeze(0) if is_single else rotated
+
 
 # dac
 """
-def reflect_nodes(nodes: torch.Tensor, angle_rad: float) -> torch.Tensor:
-    
-    #Aplica simetría axial a los nodos respecto a un eje con ángulo 'angle_rad'
-    que pasa por el centro (0.5, 0.5).
-  
-    c_nodes = nodes[..., :2] - 0.5
-    cos_2a = torch.cos(2 * angle_rad)
-    sin_2a = torch.sin(2 * angle_rad)
-    
-    # Matriz de reflexión: [[cos(2a), sin(2a)], [sin(2a), -cos(2a)]]
-    reflect_matrix = torch.tensor([
-        [cos_2a, sin_2a],
-        [sin_2a, -cos_2a]
-    ], dtype=nodes.dtype, device=nodes.device)
-    
-    reflected_coords = torch.matmul(c_nodes, reflect_matrix.T) + 0.5
-    
-    if nodes.shape[-1] > 2:
-        return torch.cat((reflected_coords, nodes[..., 2:]), dim=-1)
-    return reflected_coords
-    """
-
-# dac: similar a fx comentada pero barajando orden de los nodos para que no haga
- # trampas el modelo, ademas, ahora hay un angulo por grafo, no un angulo por lote
 def reflect_nodes(nodes: torch.Tensor, angles: torch.Tensor) -> torch.Tensor:
-    """
-    Aplica simetría axial a cada grafo del batch usando un ángulo individual.
-    angles: Tensor de forma [batch_size]
-    """
+    
+    #Aplica simetría axial a cada grafo del batch usando un ángulo individual.
+    #angles: Tensor de forma [batch_size]
+    
     batch_size, n_nodes, dims = nodes.shape
     device = nodes.device
     
@@ -265,3 +281,109 @@ def reflect_nodes(nodes: torch.Tensor, angles: torch.Tensor) -> torch.Tensor:
         shuffled_nodes[i] = reflected_coords[i, perm]
     
     return shuffled_nodes
+"""
+"""
+def reflect_nodes(nodes: torch.Tensor, angles) -> torch.Tensor:
+    #Versión híbrida para reflexión.
+    is_single = nodes.dim() == 2
+    if is_single:
+        nodes = nodes.unsqueeze(0)
+
+    batch_size, n_nodes, _ = nodes.shape
+    device = nodes.device
+
+    if not isinstance(angles, torch.Tensor):
+        angles = torch.tensor([angles], device=device, dtype=nodes.dtype)
+    else:
+        angles = angles.to(device)
+
+    angles = angles.view(batch_size, 1, 1)
+    
+    cos_2a = torch.cos(2 * angles)
+    sin_2a = torch.sin(2 * angles)
+    
+    x = nodes[..., 0:1] - 0.5
+    y = nodes[..., 1:2] - 0.5
+    
+    new_x = x * cos_2a + y * sin_2a + 0.5
+    new_y = x * sin_2a - y * cos_2a + 0.5
+    
+    reflected = torch.cat([new_x, new_y], dim=-1)
+    if nodes.shape[-1] > 2:
+        reflected = torch.cat((reflected, nodes[..., 2:]), dim=-1)
+        
+    # Barajado por seguridad (siempre en batch)
+    shuffled = torch.zeros_like(reflected)
+    for i in range(batch_size):
+        perm = torch.randperm(n_nodes, device=device)
+        shuffled[i] = reflected[i, perm]
+        
+    return shuffled.squeeze(0) if is_single else shuffled
+"""
+def reflect_nodes(nodes: torch.Tensor, angles, shuffle=True) -> torch.Tensor:
+    """
+    Refleja los nodos y, por defecto, baraja su orden (shuffle) para evitar 'shortcuts'.
+    """
+    is_single = nodes.dim() == 2
+    if is_single:
+        nodes = nodes.unsqueeze(0)
+
+    batch_size, n_nodes, dims = nodes.shape
+    device = nodes.device
+
+    # Convertir angles a tensor si es float
+    if not isinstance(angles, torch.Tensor):
+        angles = torch.tensor([angles], device=device, dtype=nodes.dtype)
+    else:
+        angles = angles.to(device)
+
+    angles = angles.view(batch_size, 1, 1)
+    
+    # Ecuación de reflexión axial
+    cos_2a = torch.cos(2 * angles)
+    sin_2a = torch.sin(2 * angles)
+    
+    x = nodes[..., 0:1] - 0.5
+    y = nodes[..., 1:2] - 0.5
+    
+    new_x = x * cos_2a + y * sin_2a + 0.5
+    new_y = x * sin_2a - y * cos_2a + 0.5
+    
+    reflected = torch.cat([new_x, new_y], dim=-1)
+    if dims > 2:
+        reflected = torch.cat((reflected, nodes[..., 2:]), dim=-1)
+        
+    # --- LA CLAVE: BARAJADO CONDICIONAL ---
+    if not shuffle:
+        return reflected.squeeze(0) if is_single else reflected
+    
+    # Barajado aleatorio de los índices de los nodos
+    shuffled = torch.zeros_like(reflected)
+    for i in range(batch_size):
+        perm = torch.randperm(n_nodes, device=device)
+        shuffled[i] = reflected[i, perm]
+        
+    return shuffled.squeeze(0) if is_single else shuffled
+
+def translate_nodes(nodes, angles, distances):
+    """
+    Desplaza todos los nodos en una dirección (angle) y distancia (distance).
+    nodes: [B, N, 2] | angles: [B] en radianes | distances: [B]
+    """
+    device = nodes.device
+    batch_size = nodes.shape[0]
+    
+    # Asegurar que sean tensores [B, 1, 1] para broadcasting
+    angles = angles.to(device).view(batch_size, 1, 1)
+    distances = distances.to(device).view(batch_size, 1, 1)
+    
+    # Calcular desplazamiento en X e Y
+    dx = distances * torch.cos(angles)
+    dy = distances * torch.sin(angles)
+    
+    # Aplicar el desplazamiento
+    translated_nodes = nodes.clone()
+    translated_nodes[..., 0:1] += dx
+    translated_nodes[..., 1:2] += dy
+    
+    return translated_nodes
