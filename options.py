@@ -108,7 +108,7 @@ def get_options(args=None):
     parser.add_argument('--use_distributed', action='store_true', 
                         help='Enable Distributed Data Parallel (DDP) for pre-training')
    
-    parser.add_argument('--pretrain_type', type=str, default='rotation', choices=['rotation', 'symmetry', 'rot+sym', 'translation'], help="Estrategia de pre-entrenamiento")
+    parser.add_argument('--pretrain_type', type=str, default='rotation', choices=['rotation', 'symmetry', 'rot+sym+trans', 'translation'], help="Estrategia de pre-entrenamiento")
 
     # Misc
     parser.add_argument('--num_workers', type=int, default=0,

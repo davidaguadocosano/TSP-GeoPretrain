@@ -119,21 +119,32 @@ def train_epoch(init_embed,encoder, projector, optimizer, dataloader, epoch, tb_
         curr_batch_size = batch['nodes_v1'].size(0)
         angles_rot = torch.rand(curr_batch_size) * 2 * np.pi
         angles_sym = torch.rand(curr_batch_size) * np.pi
+        angles_trans = torch.rand(curr_batch_size) * 2 * np.pi
+        dist_trans = torch.rand(curr_batch_size) * 0.15 
 
-        if opts.pretrain_type == 'rot+sym':
-            choice = torch.randint(0, 3, (curr_batch_size,))
-            # FORZAMOS CLONE DESDE V1 para ignorar cualquier rotación del Dataset
+        if opts.pretrain_type == 'rot+sym+trans':
+            # 1:R, 2:S, 3:R+S, 4:T, 5:R+T, 6:S+T, 7:R+S+T
+            choice = torch.randint(1, 8, (curr_batch_size,))
             v2_nodes = batch['nodes_v1'].clone()
             
-            mask_rot = (choice == 0) | (choice == 2)
-            mask_sym = (choice == 1) | (choice == 2)
+            # Generamos máscaras basadas en los "bits" de la elección
+            mask_rot = (choice & 1) > 0   # Si el bit 0 está activo
+            mask_sym = (choice & 2) > 0   # Si el bit 1 está activo
+            mask_trans = (choice & 4) > 0 # Si el bit 2 está activo
             
+            # Aplicamos en orden: Rotación -> Simetría -> Traslación
             if mask_rot.any():
                 v2_nodes[mask_rot] = data_utils.rotate_nodes(v2_nodes[mask_rot], angles_rot[mask_rot])
+            
             if mask_sym.any():
-                # IMPORTANTE: Aquí pasamos shuffle=True para que el modelo aprenda
+                # Shuffle=True para el entrenamiento real
                 v2_nodes[mask_sym] = data_utils.reflect_nodes(v2_nodes[mask_sym], angles_sym[mask_sym], shuffle=True)
             
+            if mask_trans.any():
+                v2_nodes[mask_trans] = data_utils.translate_nodes(v2_nodes[mask_trans], angles_trans[mask_trans], dist_trans[mask_trans])
+            
+            batch['nodes_v2'] = v2_nodes
+            batch['graph_v2'] = batch['graph_v1']
             batch['nodes_v2'] = v2_nodes
             batch['graph_v2'] = batch['graph_v1']
 
@@ -150,38 +161,36 @@ def train_epoch(init_embed,encoder, projector, optimizer, dataloader, epoch, tb_
 
         # --- BLOQUE DE VISUALIZACIÓN DE DEBUG ---
         if epoch == 0 and batch_id == 0:
-            if opts.pretrain_type == 'rot+sym':
-                # Buscamos índices para cada caso en el batch
-                idx_rot = (choice == 0).nonzero(as_tuple=True)[0]
-                idx_sym = (choice == 1).nonzero(as_tuple=True)[0]
-                idx_both = (choice == 2).nonzero(as_tuple=True)[0]
+            if opts.pretrain_type == 'rot+sym+trans':
+                # Definimos los nombres de las 7 combinaciones posibles
+                combos = {
+                    1: "SOLO_ROT", 2: "SOLO_SYM", 3: "ROT+SYM",
+                    4: "SOLO_TRANS", 5: "ROT+TRANS", 6: "SYM+TRANS",
+                    7: "ROT+SYM+TRANS"
+                }
 
-                # 1. Caso Solo Rotación
-                if len(idx_rot) > 0:
-                    i = idx_rot[0].item()
-                    save_transformation_check(
-                        batch['nodes_v1'][i], batch['nodes_v2'][i], 
-                        opts.save_dir, "ROTACION", epoch
-                    )
-                
-                # 2. Caso Solo Simetría (Generamos versión sin shuffle para confirmar el eje)
-                if len(idx_sym) > 0:
-                    i = idx_sym[0].item()
-                    v2_no_shuffle = data_utils.reflect_nodes(batch['nodes_v1'][i:i+1], angles_sym[i], shuffle=False)
-                    save_transformation_check(
-                        batch['nodes_v1'][i], v2_no_shuffle[0], 
-                        opts.save_dir, "SIMETRIA", epoch, angle=angles_sym[i].item()
-                    )
-                
-                # 3. Caso Rotación + Simetría (Sin shuffle para confirmar composición)
-                if len(idx_both) > 0:
-                    i = idx_both[0].item()
-                    v2_step1 = data_utils.rotate_nodes(batch['nodes_v1'][i:i+1], angles_rot[i])
-                    v2_debug_both = data_utils.reflect_nodes(v2_step1, angles_sym[i], shuffle=False)
-                    save_transformation_check(
-                        batch['nodes_v1'][i], v2_debug_both[0], 
-                        opts.save_dir, "ROT+SYM", epoch, angle=angles_sym[i].item()
-                    )
+                for code, name in combos.items():
+                    # Buscar el primer índice en el batch que tenga esta combinación exacta
+                    idx = (choice == code).nonzero(as_tuple=True)[0]
+                    
+                    if len(idx) > 0:
+                        i = idx[0].item()
+                        # Re-calculamos v2 para debug (SIN SHUFFLE) para que el ojo humano lo entienda
+                        v2_debug = batch['nodes_v1'][i:i+1].clone()
+                        
+                        if code & 1: # Aplicar Rotación
+                            v2_debug = data_utils.rotate_nodes(v2_debug, angles_rot[i:i+1])
+                        if code & 2: # Aplicar Simetría (sin shuffle para la foto)
+                            v2_debug = data_utils.reflect_nodes(v2_debug, angles_sym[i:i+1], shuffle=False)
+                        if code & 4: # Aplicar Traslación
+                            v2_debug = data_utils.translate_nodes(v2_debug, angles_trans[i:i+1], dist_trans[i:i+1])
+                        
+                        # Guardamos la imagen con el eje si hay simetría implicada
+                        eje = angles_sym[i].item() if (code & 2) else None
+                        save_transformation_check(
+                            batch['nodes_v1'][i], v2_debug[0], 
+                            opts.save_dir, name, epoch, angle=eje
+                        )
             
             if opts.pretrain_type == 'translation':
                 save_transformation_check(
