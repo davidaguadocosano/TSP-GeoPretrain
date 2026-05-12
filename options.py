@@ -99,6 +99,8 @@ def get_options(args=None):
     #dac: escoger cuantos tsp se hacen para comparar 2 modelos
     parser.add_argument('--eval_size', type=int, default=1, help="Número de TSPs a resolver para calcular el coste medio (por defecto 1)")
     
+    parser.add_argument('--solver', type=str, default=None, choices=['concorde', 'lkh'], help="Solucionador externo para comparar (concorde o lkh). Si es None, compara dos modelos.")
+
     # dac:  Pre-training / Contrastive Learning
     parser.add_argument('--pretrain', action='store_true', help='Enable pre-training mode')
     parser.add_argument('--cl_temp', type=float, default=0.07, 

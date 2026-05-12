@@ -23,55 +23,6 @@ from utils2.train_utils import set_dataparallel, setup, cleanup, load_lr_schedul
 from utils2.plot_utils import save_transformation_check
 import utils2.data_utils as data_utils
 
-"""
-def save_rotation_check(nodes_v1, nodes_v2, epoch, save_dir):
-    
-    # Guarda una imagen con el grafo original y el rotado lado a lado.
-    
-    # Tomamos solo la primera muestra del batch y la movemos a CPU
-    v1 = nodes_v1[0].cpu().numpy()
-    v2 = nodes_v2[0].cpu().numpy()
-    
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-    
-    # Título dinámico
-    title_v2 = "Rotado (v2)" if pretrain_type == 'rotation' else "Reflejado (v2)"
-    
-    for i, (coords, title) in enumerate([(v1, "Original (v1)"), (v2, title_v2)]):
-        axes[i].scatter(coords[:, 0], coords[:, 1], c='red', s=30)
-        axes[i].plot(coords[:, 0], coords[:, 1], c='blue', alpha=0.3)
-        axes[i].set_title(title)
-        axes[i].set_xlim(-0.1, 1.1)
-        axes[i].set_ylim(-0.1, 1.1)
-        axes[i].set_aspect('equal')
-
-    plt.suptitle(f"Chequeo {pretrain_type.capitalize()} - Época {epoch}")
-    
-    filename = f"{pretrain_type}_check_epoch_{epoch}.png"
-    save_path = os.path.join(save_dir, filename)
-    plt.savefig(save_path)
-    plt.close()
-    print(f"[*] Imagen de control guardada en: {save_path}")
-    """
-"""
-    # Dibujamos los puntos y conectamos en orden (para ver mejor la rotación)
-    for i, (coords, title) in enumerate([(v1, "Original (v1)"), (v2, "Rotado (v2)")]):
-        axes[i].scatter(coords[:, 0], coords[:, 1], c='red', s=30)
-        # Dibujamos líneas siguiendo el índice para que se aprecie el "giro" de la estructura
-        axes[i].plot(coords[:, 0], coords[:, 1], c='blue', alpha=0.3)
-        axes[i].set_title(title)
-        axes[i].set_xlim(-0.1, 1.1) # Un poco de margen para ver bien los bordes
-        axes[i].set_ylim(-0.1, 1.1)
-        axes[i].set_aspect('equal')
-
-    plt.suptitle(f"Chequeo de Rotación - Época {epoch}")
-    
-    save_path = os.path.join(save_dir, f"rotation_check_epoch_{epoch}.png")
-    plt.savefig(save_path)
-    plt.close()
-    print(f"[*] Imagen de control guardada en: {save_path}")
-    """
-
 class ProjectionHead(nn.Module):
     """Cabeza de proyección MLP para aprendizaje contrastivo (estilo SimCLR)"""
     def __init__(self, dim_in, dim_out):
