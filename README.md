@@ -101,3 +101,45 @@ CUDA_VISIBLE_DEVICES=<available-gpu-ids> python eval.py data/tsp/tsp10-200_conco
 - [C. K. Joshi, T. Laurent, and X. Bresson. An efficient graph convolutional network technique for the travelling salesman problem. arXiv preprint arXiv:1906.01227, 2019.](https://arxiv.org/abs/1906.01227)
 - [A. Nowak, S. Villar, A. S. Bandeira, and J. Bruna. A note on learning algorithms for quadratic assignment with graph neural networks. arXiv preprint arXiv:1706.07450, 2017.](https://arxiv.org/abs/1706.07450v1)
 - [I. Bello, H. Pham, Q. V. Le, M. Norouzi, and S. Bengio. Neural combinatorial optimization with reinforcement learning. In International Conference on Learning Representations, 2017.](https://arxiv.org/abs/1611.09940)
+
+
+
+
+
+# Pre-entrenamiento
+
+El proyecto está en dos ordenadores (piranesi_03 y minerva), el procedimiento en cada uno de ellos es ligeramente distinto. Por lo que especifico las instrucciones para cada uno de ellos.
+Iniciar el proyecto:
+En ambos está en una carpeta llamada “learn-tsp” -> cd learning-tsp/
+En piranesi_03 se utiliza un entorno de conda -> conda activate learn_tsp
+En minerva se utiliza un Docker: docker run --user $(id -u):$(id -g) --gpus all -it --rm -v $(pwd):/app learn_tsp bash
+
+Ejecución de los scripts:
+En esta sección la única diferencia es que el proyecto no funciona cuando trabajan dos GPU en paralelo. Para piranesi_03 esto no supone nada, pero para minerva sí. Por lo que delante de cada comando que se ejecute en minerva se debe añadir -> CUDA_VISIBLE_DEVICES=0
+
+
+Pre-entrenamiento:
+Para pre-entrenar se ejecuta el script “pretrain.py”. Se guardará la red pre-entrenada con el nombre que indiques con “run_name”. En caso de querer continuar un pre-entrenamiento de un modelo pre-entrenado a medias, indicas su path con “load_path”. El pre-entrenamiento se escoge con “pretrain_type”, entre las siguientes opciones ('rotation', 'symmetry', 'translation', 'hybrid'). En caso de escoger 'hybrid', utiliza una variable llamada “hybrid_transformations” para indicar cuales quieres utilizar (rot trans sym). La cantidad de nodos mínima y máxima de los TSP se pueden indicar con “min_size” y “max_size”. Un ejemplo de comando para ejecutar un pre-entrenamiento híbrido sería:
+
+python pretrain.py --encoder gnn --aggregation max --embedding_dim 128 --normalization layer --learn_norm --epoch_size 128000 --n_epochs 50 --run_name "mi_preentrenamiento" --gated --pretrain_type hybrid --hybrid_transformations rot trans sym
+
+Los modelos se guardan en la carpeta “outputs”.
+
+
+Entrenamiento:
+Para entrenar se ejecuta el script “run.py”. Nuevamente al entrenamiento se le nombra con la variable “run_name”. Como se pueden entrenar modelos desde 0 o pre-entrenados, existe una variable llamada “load_path” en la que, si queremos entrenar un modelo pre-entrenado le damos el valor de la ruta relativa de los pesos de la red pre-entrenada, y si no queremos usar un modelo, pre-entrenado, no llamamos a esa variable. Un ejemplo de comando para ejecutar un entrenamiento sería:
+
+python run.py --min_size 50 --max_size 50 --encoder gnn --gated --normalization layer --learn_norm --lr_model 0.0001 --epoch_size 128000 --batch_size 256 --n_epochs 50 --load_path "outputs/tsp_20-50/mi_preentrenamiento_20260223T214729/encoder-epoch-46.pt" --run_name "TSP50_pretrained"
+
+Nuevamente, los modelos se guardan en la carpeta “outputs”.
+
+
+Evaluación:
+Para evaluar se ejecuta el script “compare_tsp.py”. Se comparan los modelos indicados por su ruta relativa en las variables “load_path” y “resume”. “eval_size” indica el número de tsp que se evaluarán, y “min_size” el tamaño de los TSP. Si quieres comparar un modelo con concorde, no utilizas la variable “resume”, y a cambio añades “--solver concorde”. Y si quieres evaluar siempre sobre los mismos escenarios, se puede utilizar una semolla concreta “--seed 1”. Un ejemplo de comando para comparar 2 modelos es:
+
+python compare_tsp.py --load_path outputs/tsp_20-50/mi_preentrenamiento_20260223T214729/encoder-epoch-49.pt --resume outputs/tsp_50-50/TSP_pretrained_normbueno_nofreeze_20260301T235836/epoch-49.pt --embedding_dim 128 --gated --eval_size 10 --normalization layer --min_size 50
+
+Por pantalla te saldrán varios valores calculados y en la carpeta se te generará una imagen
+“comparativa_concorde.png” o “comparativa_modelo 2.png” según corresponda.
+
+Si quieres ver las gráficas de cómo han ido los entrenamientos/pre-entrenamientos -> tensorboard --logdir logs/

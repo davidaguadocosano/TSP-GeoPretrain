@@ -10,6 +10,11 @@ from problems.tsp.state_tsp import StateTSP
 from utils.beam_search import beam_search
 from utils2.data_utils import rotate_nodes
 
+import subprocess
+import tempfile
+import time
+import re
+
 def nearest_neighbor_graph(nodes, neighbors, knn_strat):
     """Returns k-Nearest Neighbor graph as a **NEGATIVE** adjacency matrix
     """
@@ -239,3 +244,84 @@ class TSPPretrainDataset(TSPDataset):
             'nodes_v2': nodes_v2,
             'graph_v2': graph_v2
         }
+
+#dac
+def solve_concorde(nodes, executable="concorde"):
+    """Llama al binario de Concorde para resolver el TSP de forma exacta."""
+    num_nodes = len(nodes)
+    # Concorde suele trabajar mejor con enteros, escalamos las coordenadas [0,1]
+    scale = 1000000
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        node_file = os.path.join(tmpdir, "problem.tsp")
+        with open(node_file, "w") as f:
+            f.write(f"NAME : problem\nTYPE : TSP\nDIMENSION : {num_nodes}\n")
+            f.write("EDGE_WEIGHT_TYPE : EUC_2D\nNODE_COORD_SECTION\n")
+            for i, (x, y) in enumerate(nodes):
+                f.write(f"{i+1} {int(x*scale)} {int(y*scale)}\n")
+            f.write("EOF\n")
+
+        # Ejecutar Concorde
+        sol_file = "problem.sol" # Concorde genera este archivo por defecto
+        cmd = [executable, "-o", sol_file, node_file]
+        
+        # Redirigimos salida para que no ensucie la terminal
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, cwd=tmpdir)
+        
+        # Leer la solución
+        with open(os.path.join(tmpdir, sol_file), "r") as f:
+            lines = f.readlines()
+            # El primer número es la dimensión, el resto es el tour
+            tour = [int(x) for x in " ".join(lines).split()][1:]
+            
+        # Calcular el coste real (usando coordenadas originales)
+        # Reutilizamos la lógica de coste del proyecto o calculamos L2
+        nodes_torch = torch.FloatTensor(nodes).unsqueeze(0)
+        tour_torch = torch.LongTensor(tour).unsqueeze(0)
+        from problems.tsp.problem_tsp import TSP
+        cost, _ = TSP.get_costs(nodes_torch, tour_torch)
+        
+        return cost.item(), tour
+
+def solve_lkh(nodes, executable="LKH"):
+    """Llama al binario de LKH-3 para resolver el TSP."""
+    num_nodes = len(nodes)
+    scale = 1000000
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tsp_file = os.path.join(tmpdir, "problem.tsp")
+        out_file = os.path.join(tmpdir, "problem.out")
+        par_file = os.path.join(tmpdir, "problem.par")
+        
+        # 1. Escribir archivo .tsp
+        with open(tsp_file, "w") as f:
+            f.write(f"NAME : problem\nTYPE : TSP\nDIMENSION : {num_nodes}\n")
+            f.write("EDGE_WEIGHT_TYPE : EUC_2D\nNODE_COORD_SECTION\n")
+            for i, (x, y) in enumerate(nodes):
+                f.write(f"{i+1} {int(x*scale)} {int(y*scale)}\n")
+            f.write("EOF\n")
+            
+        # 2. Escribir archivo de parámetros .par
+        with open(par_file, "w") as f:
+            f.write(f"PROBLEM_FILE = {tsp_file}\nOUTPUT_TOUR_FILE = {out_file}\nRUNS = 1\n")
+
+        # 3. Ejecutar LKH
+        subprocess.run([executable, par_file], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        
+        # 4. Leer el tour del archivo de salida
+        tour = []
+        with open(out_file, "r") as f:
+            lines = f.readlines()
+            start_idx = lines.index("TOUR_SECTION\n") + 1
+            for line in lines[start_idx:]:
+                node = int(line.strip())
+                if node == -1: break
+                tour.append(node - 1) # LKH usa 1-indexing
+                
+        # Calcular coste
+        nodes_torch = torch.FloatTensor(nodes).unsqueeze(0)
+        tour_torch = torch.LongTensor(tour).unsqueeze(0)
+        from problems.tsp.problem_tsp import TSP
+        cost, _ = TSP.get_costs(nodes_torch, tour_torch)
+        
+        return cost.item(), tour
