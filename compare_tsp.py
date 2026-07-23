@@ -195,6 +195,12 @@ def run_comparison(opts):
                     cost, tour = solve_concorde(curr_nodes)
                 elif comp['solver_name'] == 'lkh':
                     cost, tour = solve_lkh(curr_nodes)
+                elif comp['solver_name'] == 'ortools':
+                    from problems.tsp.problem_tsp import solve_ortools
+                    cost, tour = solve_ortools(curr_nodes, time_limit=opts.time_limit)
+                elif comp['solver_name'] in ['aco', 'ga']:
+                    from problems.tsp.problem_tsp import solve_pycombinatorial
+                    cost, tour = solve_pycombinatorial(curr_nodes, algorithm=comp['solver_name'])
                 else:
                     raise ValueError(f"Solver {comp['solver_name']} no reconocido")
                 

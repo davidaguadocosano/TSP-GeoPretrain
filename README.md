@@ -121,23 +121,36 @@ En esta sección la única diferencia es que el proyecto no funciona cuando trab
 Pre-entrenamiento:
 Para pre-entrenar se ejecuta el script “pretrain.py”. Se guardará la red pre-entrenada con el nombre que indiques con “run_name”. En caso de querer continuar un pre-entrenamiento de un modelo pre-entrenado a medias, indicas su path con “load_path”. El pre-entrenamiento se escoge con “pretrain_type”, entre las siguientes opciones ('rotation', 'symmetry', 'translation', 'hybrid'). En caso de escoger 'hybrid', utiliza una variable llamada “hybrid_transformations” para indicar cuales quieres utilizar (rot trans sym). La cantidad de nodos mínima y máxima de los TSP se pueden indicar con “min_size” y “max_size”. Un ejemplo de comando para ejecutar un pre-entrenamiento híbrido sería:
 
+```bash
 python pretrain.py --encoder gnn --aggregation max --embedding_dim 128 --normalization layer --learn_norm --epoch_size 128000 --n_epochs 50 --run_name "mi_preentrenamiento" --gated --pretrain_type hybrid --hybrid_transformations rot trans sym
+```
 
 Los modelos se guardan en la carpeta “outputs”.
 
 
-Entrenamiento:
+# Entrenamiento
 Para entrenar se ejecuta el script “run.py”. Nuevamente al entrenamiento se le nombra con la variable “run_name”. Como se pueden entrenar modelos desde 0 o pre-entrenados, existe una variable llamada “load_path” en la que, si queremos entrenar un modelo pre-entrenado le damos el valor de la ruta relativa de los pesos de la red pre-entrenada, y si no queremos usar un modelo, pre-entrenado, no llamamos a esa variable. Un ejemplo de comando para ejecutar un entrenamiento sería:
 
+```bash
 python run.py --min_size 50 --max_size 50 --encoder gnn --gated --normalization layer --learn_norm --lr_model 0.0001 --epoch_size 128000 --batch_size 256 --n_epochs 50 --load_path "outputs/tsp_20-50/mi_preentrenamiento_20260223T214729/encoder-epoch-46.pt" --run_name "TSP50_pretrained"
+```
 
 Nuevamente, los modelos se guardan en la carpeta “outputs”.
 
 
-Evaluación:
+# Evaluación
 Para evaluar se ejecuta el script “compare_tsp.py”. Se comparan los modelos indicados por su ruta relativa en las variables “load_path” y “resume”. “eval_size” indica el número de tsp que se evaluarán, y “min_size” el tamaño de los TSP. Si quieres comparar un modelo con concorde, no utilizas la variable “resume”, y a cambio añades “--solver concorde”. Y si quieres evaluar siempre sobre los mismos escenarios, se puede utilizar una semolla concreta “--seed 1”. Un ejemplo de comando para comparar 2 modelos es:
 
+```bash
 python compare_tsp.py --load_path outputs/tsp_20-50/mi_preentrenamiento_20260223T214729/encoder-epoch-49.pt --resume outputs/tsp_50-50/TSP_pretrained_normbueno_nofreeze_20260301T235836/epoch-49.pt --embedding_dim 128 --gated --eval_size 10 --normalization layer --min_size 50
+```
+
+Si queremos comparar un modelo con un algoritmo de resolucción, seleccionaremos el modelo en "load_path" e indicaremos la comparativa con en solver con `--solver x`. Están disponibles los siguientes solvers `concorde, lkh, ortools, aco, ga`.
+
+-lkh es LKH-3
+-ortools es Google OR-Tools (hace una primera ruta usando NN, y luego "desenmaraña" usando 3-opt). Al utilizar este algoritmo, indicaremos con la variable `--time_limit` cuanto tiempo queremos que dedique a resolver cada instancia del TSP.
+-aco es Ant Colony Optimization
+-ga es Genetic Algorithms
 
 Por pantalla te saldrán varios valores calculados y en la carpeta se te generará una imagen
 “comparativa_concorde.png” o “comparativa_modelo 2.png” según corresponda.

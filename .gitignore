@@ -1,7 +1,5 @@
 .DS_Store
 data/*/*.txt
-outputs/
-logs/
 results/
 images/
 archive_*/
@@ -14,3 +12,5 @@ __pycache__/
 *.tc_backward.*
 *.log
 *.bak
+*.png
+*.gz
