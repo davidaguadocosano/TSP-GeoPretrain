@@ -283,7 +283,7 @@ def solve_concorde(nodes, executable="concorde"):
         
         return cost.item(), tour
 
-def solve_lkh(nodes, executable="LKH"):
+def solve_lkh(nodes, executable="/home/pfc/dac/learning-tsp/LKH-3.0.9/LKH"):
     """Llama al binario de LKH-3 para resolver el TSP."""
     num_nodes = len(nodes)
     scale = 1000000
@@ -325,3 +325,98 @@ def solve_lkh(nodes, executable="LKH"):
         cost, _ = TSP.get_costs(nodes_torch, tour_torch)
         
         return cost.item(), tour
+
+def solve_ortools(nodes, time_limit=1.0):
+    """Llama a Google OR-Tools para resolver el TSP usando heurísticas."""
+    from ortools.constraint_solver import routing_enums_pb2
+    from ortools.constraint_solver import pywrapcp
+    import numpy as np
+    from scipy.spatial.distance import pdist, squareform
+
+    # Calcular matriz de distancias escalada a enteros
+    scale = 1000000
+    dist_matrix = squareform(pdist(nodes, metric='euclidean')) * scale
+    dist_matrix = dist_matrix.astype(int).tolist()
+
+    # Configurar OR-Tools
+    manager = pywrapcp.RoutingIndexManager(len(nodes), 1, 0)
+    routing = pywrapcp.RoutingModel(manager)
+
+    def distance_callback(from_index, to_index):
+        from_node = manager.IndexToNode(from_index)
+        to_node = manager.IndexToNode(to_index)
+        return dist_matrix[from_node][to_node]
+
+    transit_callback_index = routing.RegisterTransitCallback(distance_callback)
+    routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
+
+    search_parameters = pywrapcp.DefaultRoutingSearchParameters()
+    search_parameters.first_solution_strategy = (
+        routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
+    search_parameters.local_search_metaheuristic = (
+        routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH) 
+
+    # Asignar tiempo límite usando segundos y nanosegundos para soportar decimales
+    search_parameters.time_limit.seconds = int(time_limit)
+    search_parameters.time_limit.nanos = int((time_limit % 1) * 1e9)
+
+    solution = routing.SolveWithParameters(search_parameters)
+    
+    if solution:
+        index = routing.Start(0)
+        tour = []
+        while not routing.IsEnd(index):
+            tour.append(manager.IndexToNode(index))
+            index = solution.Value(routing.NextVar(index))
+        
+        import torch
+        nodes_torch = torch.FloatTensor(nodes).unsqueeze(0)
+        tour_torch = torch.LongTensor(tour).unsqueeze(0)
+        from problems.tsp.problem_tsp import TSP
+        cost, _ = TSP.get_costs(nodes_torch, tour_torch)
+        return cost.item(), tour
+        
+    return float('inf'), []
+
+def solve_pycombinatorial(nodes, algorithm='aco'):
+    """Llama a pyCombinatorial para metaheurísticas (ACO, GA)."""
+    import numpy as np
+    from pyCombinatorial.utils import util
+    
+    # 1. Convertir coordenadas a array de numpy y construir matriz de distancias
+    nodes_array = np.array(nodes)
+    distance_matrix = util.build_distance_matrix(nodes_array)
+    
+    # 2. Seleccionar y ejecutar el algoritmo
+    if algorithm == 'aco':
+        # Importación dinámica (por si cambia el alias en el futuro)
+        try:
+            from pyCombinatorial.algorithm import ant_colony_optimization
+            tour, _ = ant_colony_optimization(distance_matrix)
+        except ImportError:
+            from pyCombinatorial.algorithm import aco
+            tour, _ = aco(distance_matrix)
+            
+    elif algorithm == 'ga':
+        from pyCombinatorial.algorithm import genetic_algorithm
+        # Puedes ajustar (population_size, mutation_rate, generations, etc.) pasándolos como argumentos
+        tour, _ = genetic_algorithm(distance_matrix)
+    else:
+        raise ValueError("Algoritmo pyCombinatorial no soportado")
+        
+    # El tour devuelto por pyCombinatorial a veces cierra el ciclo repitiendo el nodo inicial.
+    # Si el último elemento es igual al primero, lo quitamos para encajar con el formato NCO.
+    if tour[0] == tour[-1] and len(tour) > 1:
+        tour = tour[:-1]
+        
+    tour_indices = [int(node) - 1 for node in tour]
+    
+    # 3. Recalcular el coste exacto usando el formato de tu proyecto (con tensores)
+    import torch
+    nodes_torch = torch.FloatTensor(nodes).unsqueeze(0)
+    tour_torch = torch.LongTensor(tour_indices).unsqueeze(0)
+    
+    from problems.tsp.problem_tsp import TSP
+    cost, _ = TSP.get_costs(nodes_torch, tour_torch)
+    
+    return cost.item(), tour_indices
