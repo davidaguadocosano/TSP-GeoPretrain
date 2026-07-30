@@ -27,8 +27,9 @@ n_bars = len(data)
 total_height = 0.8
 height = total_height / n_bars
 
-# Colores y estilos (NCO en verde sólido, heurísticas en grises rayados)
-colors = ['forestgreen', '#4d4d4d', '#737373', '#999999', '#bfbfbf', '#d9d9d9']
+# Colores y estilos 
+# (Se han puesto colores categóricos de alto contraste en lugar de la escala de grises)
+colors = ['forestgreen', 'tab:blue', 'tab:orange', 'tab:red', 'tab:purple', 'tab:brown']
 hatches = ['', '////', '////', '////', '////', '////']
 edge_colors = ['white', 'black', 'black', 'black', 'black', 'black']
 
@@ -61,7 +62,7 @@ ax.set_xscale('log')
 
 # 6. Detalles estéticos y etiquetas
 ax.set_xlabel('Inference Time (Seconds, Log Scale)', fontsize=12, fontweight='bold')
-ax.set_title('Computational Efficiency Comparison (Neural Models vs Classical Heuristics)', fontsize=16, fontweight='bold', pad=20)
+# El título ha sido eliminado a petición del tutor
 ax.set_yticks(y)
 ax.set_yticklabels(tsp_sizes, fontsize=12, fontweight='bold')
 

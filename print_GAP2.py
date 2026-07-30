@@ -54,7 +54,7 @@ colors = plt.cm.tab10.colors
 
 # Definir qué elementos son heurísticas para diferenciarlos visualmente
 heuristics = ['LKH3', 'Google OR-Tools', 'Ant Colony Optimization', 'Genetic Algorithm']
-heuristic_colors = ['#4d4d4d', '#737373', '#999999', '#bfbfbf'] # Tonos de gris
+heuristic_colors = ['#4d4d4d', 'tab:blue', 'tab:purple', 'tab:orange'] 
 
 # 5. Calcular Gaps, transformar CIs y dibujar
 max_gap = 0
