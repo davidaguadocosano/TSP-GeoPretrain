@@ -31,7 +31,7 @@ To ensure maximum reproducibility and avoid dependency conflicts, this project i
 
 **1. Clone the repository:**
 ```sh
-git clone https://github.com/davidaguadocosano/TSP-GeoPretrain
+git clone https://github.com/davidaguadocosano/TSP-GeoPretrain.git
 cd TSP-GeoPretrain
 ```
 **2. Build the Docker image:**
